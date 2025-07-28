@@ -1,0 +1,4 @@
+- use `cargo run` instead of `cargo build` and then calling the binary directly, e.g `cargo run key --help` instead of `./target/release/ksm-rust key --help`.
+- tests have their own file at `/tests`.
+- always verify work with `cargo test` before considering a feature complete.
+- use `cargo check` over `cargo build` for quick validation
