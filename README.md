@@ -35,11 +35,7 @@ Create a configuration file at `~/.local/data/sessions.json`:
 
 ```json
 {
-  "dirs": [
-    "~/dev/projects",
-    "~/work/*",
-    "~/personal/code"
-  ],
+  "dirs": ["~/dev/projects", "~/work/*", "~/personal/code"],
   "base": [
     ["config", "~/.config"],
     ["dots", "~/dotfiles"]
@@ -65,6 +61,7 @@ Create a configuration file at `~/.local/data/sessions.json`:
 - **`work`**: Key-value pairs available only in work context (use `--work` flag)
 
 Each project entry is a `[key, path]` pair where:
+
 - `key`: Short identifier for quick access
 - `path`: Full or tilde-expanded path to the project directory
 
@@ -95,7 +92,6 @@ cargo install --path .
 ## Requirements
 
 - Kitty terminal emulator
-- `fd` command for directory scanning
 - Rust toolchain for building
 
 ## Environment Variables

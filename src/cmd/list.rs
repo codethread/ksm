@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use log::{debug, error, info};
 use std::env;
+use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use crate::kitty::match_session_tab;
 
@@ -40,29 +40,17 @@ fn get_projects() -> Result<Vec<String>> {
 
     debug!("Scanning for projects in directory: {}", projects_dir);
 
-    let output = Command::new("fd")
-        .args(&["--type=d", "--max-depth=1", ".", &projects_dir])
-        .output()?;
-
-    if !output.status.success() {
-        error!("Failed to list projects from directory: {}", projects_dir);
-        return Err(anyhow!("Failed to list projects"));
-    }
-
-    let stdout = String::from_utf8(output.stdout)?;
+    let entries = fs::read_dir(&projects_dir)?;
     let mut projects = Vec::new();
 
-    for line in stdout.lines() {
-        if !line.is_empty() {
-            if let Some(name) = Path::new(line).file_name().and_then(|n| n.to_str()) {
-                if name
-                    != Path::new(&projects_dir)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("")
-                {
-                    projects.push(name.to_string());
-                }
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        
+        // Only include directories (equivalent to --type=d)
+        if path.is_dir() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                projects.push(name.to_string());
             }
         }
     }

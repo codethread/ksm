@@ -1,9 +1,9 @@
 use anyhow::Result;
 use log::{debug, info, warn};
 use skim::prelude::*;
+use std::fs;
 use std::io::Cursor;
 use std::path::Path;
-use std::process::Command;
 
 use crate::config::get_all_directories;
 use crate::kitty::{create_session_tab_by_path, focus_tab, match_session_tab};
@@ -106,31 +106,25 @@ fn get_projects(directories: Vec<String>) -> Result<Vec<(String, String)>> {
         let expanded_dir = expand_tilde(&dir);
         debug!("Scanning directory: {}", expanded_dir);
 
-        let output = Command::new("fd")
-            .args(&["--type=d", "--max-depth=1", ".", &expanded_dir])
-            .output();
-
-        match output {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8(output.stdout)?;
-
-                for line in stdout.lines() {
-                    if !line.is_empty() {
-                        if let Some(name) = Path::new(line).file_name().and_then(|n| n.to_str()) {
-                            if name
-                                != Path::new(&expanded_dir)
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("")
-                            {
-                                all_projects.push((name.to_string(), line.to_string()));
+        match fs::read_dir(&expanded_dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    match entry {
+                        Ok(entry) => {
+                            let path = entry.path();
+                            
+                            // Only include directories (equivalent to --type=d)
+                            if path.is_dir() {
+                                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                    all_projects.push((name.to_string(), path.to_string_lossy().to_string()));
+                                }
                             }
+                        }
+                        Err(e) => {
+                            warn!("Error reading entry in directory {}: {}", expanded_dir, e);
                         }
                     }
                 }
-            }
-            Ok(_) => {
-                warn!("Failed to list directory: {}", expanded_dir);
             }
             Err(e) => {
                 warn!("Error scanning directory {}: {}", expanded_dir, e);
