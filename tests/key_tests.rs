@@ -1,4 +1,4 @@
-use ksm::cmd::key::{resolve_project_path, cmd_key_with_projects};
+use ksm::cmd::key::{cmd_key_with_projects, resolve_project_path};
 
 #[test]
 fn test_resolve_project_path_found() {
@@ -14,13 +14,16 @@ fn test_resolve_project_path_found() {
 
 #[test]
 fn test_resolve_project_path_not_found() {
-    let projects = vec![
-        ("P1".to_string(), "~/test/project1".to_string()),
-    ];
+    let projects = vec![("P1".to_string(), "~/test/project1".to_string())];
 
     let result = resolve_project_path("P99", &projects);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("No project found for key: P99"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("No project found for key: P99")
+    );
 }
 
 #[test]
@@ -33,9 +36,7 @@ fn test_resolve_project_path_empty_projects() {
 
 #[test]
 fn test_resolve_project_path_absolute_path() {
-    let projects = vec![
-        ("P2".to_string(), "/absolute/path/project2".to_string()),
-    ];
+    let projects = vec![("P2".to_string(), "/absolute/path/project2".to_string())];
 
     let result = resolve_project_path("P2", &projects).unwrap();
     assert_eq!(result, "/absolute/path/project2");
@@ -46,9 +47,7 @@ fn test_resolve_project_path_absolute_path() {
 // We'll test the logic by checking the early return behavior
 #[test]
 fn test_cmd_key_with_print_path_returns_early() {
-    let projects = vec![
-        ("P1".to_string(), "/test/path".to_string()),
-    ];
+    let projects = vec![("P1".to_string(), "/test/path".to_string())];
 
     // When print_path is true, the function should return Ok(()) without calling kitty functions
     // Since we can't easily mock kitty functions, we test that it doesn't panic or error
@@ -58,14 +57,17 @@ fn test_cmd_key_with_print_path_returns_early() {
 
 #[test]
 fn test_cmd_key_with_print_path_invalid_key() {
-    let projects = vec![
-        ("P1".to_string(), "/test/path".to_string()),
-    ];
+    let projects = vec![("P1".to_string(), "/test/path".to_string())];
 
     // Should return error for invalid key even with print_path=true
     let result = cmd_key_with_projects("P99", true, &projects);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("No project found for key: P99"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("No project found for key: P99")
+    );
 }
 
 #[test]

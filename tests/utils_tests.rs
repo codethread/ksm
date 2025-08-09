@@ -3,7 +3,8 @@ use std::env;
 
 #[test]
 fn test_expand_tilde_with_home() {
-    env::set_var("HOME", "/home/testuser");
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { env::set_var("HOME", "/home/testuser") };
     assert_eq!(expand_tilde("~/Documents"), "/home/testuser/Documents");
     assert_eq!(expand_tilde("~/dev/project"), "/home/testuser/dev/project");
 }

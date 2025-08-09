@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use log::{debug, error, info};
 use std::env;
 use std::fs;
@@ -46,7 +46,7 @@ fn get_projects() -> Result<Vec<String>> {
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
-        
+
         // Only include directories (equivalent to --type=d)
         if path.is_dir() {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {

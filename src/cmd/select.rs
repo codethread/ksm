@@ -74,17 +74,20 @@ pub fn cmd_select(is_work: bool) -> Result<()> {
                 );
 
                 // Check if session exists
-                if let Ok(Some(existing_tab)) = match_session_tab(&project_name) {
-                    info!("Session already exists, focusing existing tab");
-                    focus_tab(existing_tab.id)?;
-                    println!("Switched to existing session: {}", project_name);
-                } else {
-                    info!("No existing session found, creating new one");
-                    create_session_tab_by_path(&project_path, &project_name)?;
-                    println!(
-                        "Created and switched to new session: {} ({})",
-                        project_name, project_path
-                    );
+                match match_session_tab(&project_name) {
+                    Ok(Some(existing_tab)) => {
+                        info!("Session already exists, focusing existing tab");
+                        focus_tab(existing_tab.id)?;
+                        println!("Switched to existing session: {}", project_name);
+                    }
+                    _ => {
+                        info!("No existing session found, creating new one");
+                        create_session_tab_by_path(&project_path, &project_name)?;
+                        println!(
+                            "Created and switched to new session: {} ({})",
+                            project_name, project_path
+                        );
+                    }
                 }
 
                 return Ok(());
@@ -112,11 +115,14 @@ fn get_projects(directories: Vec<String>) -> Result<Vec<(String, String)>> {
                     match entry {
                         Ok(entry) => {
                             let path = entry.path();
-                            
+
                             // Only include directories (equivalent to --type=d)
                             if path.is_dir() {
                                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                    all_projects.push((name.to_string(), path.to_string_lossy().to_string()));
+                                    all_projects.push((
+                                        name.to_string(),
+                                        path.to_string_lossy().to_string(),
+                                    ));
                                 }
                             }
                         }

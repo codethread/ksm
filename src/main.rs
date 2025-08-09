@@ -27,7 +27,10 @@ fn main() -> Result<()> {
         }
         Some(Commands::Key { key, work, path }) => {
             let effective_work = work || env_work;
-            info!("Switching to project by key: {} (work: {})", key, effective_work);
+            info!(
+                "Switching to project by key: {} (work: {})",
+                key, effective_work
+            );
             cmd_key(&key, effective_work, path)?;
             if !path {
                 println!("Switched to session by key: {}", key);
