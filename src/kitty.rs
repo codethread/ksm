@@ -3,6 +3,7 @@ use log::{debug, error, info, warn};
 use serde::Deserialize;
 use std::env;
 use std::process::Command;
+use crate::kitty_lib::{KittenLsCommand, KittenFocusTabCommand, KittenLaunchCommand};
 
 const SESSION_ENV_VAR: &str = "KITTY_SESSION_PROJECT";
 
@@ -49,18 +50,10 @@ pub fn match_session_tab(project_name: &str) -> Result<Option<KittyTab>> {
     debug!("Matching session tab for project: {}", project_name);
 
     let socket = get_kitty_socket();
-    let match_arg = format!("env:{}={}", SESSION_ENV_VAR, project_name);
 
-    debug!("Running kitten @ --to={} ls --match={}", socket, match_arg);
-
-    let output = Command::new("kitten")
-        .args(&[
-            "@",
-            &format!("--to={}", socket),
-            "ls",
-            &format!("--match={}", match_arg),
-        ])
-        .output()?;
+    let output = KittenLsCommand::new(socket)
+        .match_env(SESSION_ENV_VAR, project_name)
+        .execute()?;
 
     if !output.status.success() {
         debug!("No matching session found for project: {}", project_name);
@@ -93,19 +86,8 @@ pub fn focus_tab(tab_id: u32) -> Result<()> {
     info!("Focusing tab with id: {}", tab_id);
 
     let socket = get_kitty_socket();
-    debug!(
-        "Running kitten @ --to={} focus-tab --match=id:{}",
-        socket, tab_id
-    );
 
-    let status = Command::new("kitten")
-        .args(&[
-            "@",
-            &format!("--to={}", socket),
-            "focus-tab",
-            &format!("--match=id:{}", tab_id),
-        ])
-        .status()?;
+    let status = KittenFocusTabCommand::new(socket, tab_id).execute()?;
 
     if !status.success() {
         error!("Failed to focus tab {}", tab_id);
@@ -124,25 +106,13 @@ pub fn create_session_tab_by_path(project_path: &str, project_name: &str) -> Res
 
     let socket = get_kitty_socket();
     let session_name = format!("📁 {}", project_name);
-    let env_arg = format!("{}={}", SESSION_ENV_VAR, project_name);
 
-    debug!(
-        "Running kitten @ --to={} launch --type=tab --cwd={} --env={} --tab-title={}",
-        socket, project_path, env_arg, session_name
-    );
-
-    let status = Command::new("kitten")
-        .args(&[
-            "@",
-            &format!("--to={}", socket),
-            "launch",
-            "--type=tab",
-            &format!("--cwd={}", project_path),
-            &format!("--env={}", env_arg),
-            "--tab-title",
-            &session_name,
-        ])
-        .status()?;
+    let status = KittenLaunchCommand::new(socket)
+        .launch_type("tab")
+        .cwd(project_path)
+        .env(SESSION_ENV_VAR, project_name)
+        .tab_title(&session_name)
+        .execute()?;
 
     if !status.success() {
         error!(
