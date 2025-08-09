@@ -1,19 +1,18 @@
-use anyhow::{Result, anyhow};
-use log::{debug, error, info};
+use anyhow::Result;
+use log::{debug, info};
 use std::env;
 use std::fs;
-use std::path::Path;
 
-use crate::kitty::match_session_tab;
+use crate::app::App;
 
-pub fn cmd_list() -> Result<()> {
+pub fn cmd_list(app: &App) -> Result<()> {
     info!("Listing all available sessions");
 
     let projects = get_projects()?;
 
     println!("Available sessions:");
     for project in projects {
-        let (status, tab_info) = match match_session_tab(&project) {
+        let (status, tab_info) = match app.kitty.match_session_tab(&project) {
             Ok(Some(tab)) => {
                 debug!(
                     "Project '{}' has active session with tab id: {}",

@@ -3,15 +3,16 @@ use log::{debug, error, info};
 use std::path::Path;
 
 use crate::config::{KeyedProject, get_keyed_projects};
-use crate::kitty::{create_session_tab_by_path, focus_tab, match_session_tab};
+use crate::app::App;
 use crate::utils::expand_tilde;
 
-pub fn cmd_key(key: &str, is_work: bool, print_path: bool) -> Result<()> {
+pub fn cmd_key(app: &App, key: &str, is_work: bool, print_path: bool) -> Result<()> {
     let keyed_projects = get_keyed_projects(is_work)?;
-    cmd_key_with_projects(key, print_path, &keyed_projects)
+    cmd_key_with_projects(app, key, print_path, &keyed_projects)
 }
 
 pub fn cmd_key_with_projects(
+    app: &App,
     key: &str,
     print_path: bool,
     keyed_projects: &[KeyedProject],
@@ -41,13 +42,13 @@ pub fn cmd_key_with_projects(
     );
 
     // Check if session exists
-    if let Ok(Some(existing_tab)) = match_session_tab(project_name) {
+    if let Ok(Some(existing_tab)) = app.kitty.match_session_tab(project_name) {
         info!("Session already exists, focusing existing tab");
-        return focus_tab(existing_tab.id);
+        return app.kitty.focus_tab(existing_tab.id);
     }
 
     info!("No existing session found, creating new one");
-    create_session_tab_by_path(&expanded_path, project_name)
+    app.kitty.create_session_tab_by_path(&expanded_path, project_name)
 }
 
 pub fn resolve_project_path(key: &str, keyed_projects: &[KeyedProject]) -> Result<String> {

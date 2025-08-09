@@ -1,3 +1,4 @@
+use ksm::app::App;
 use ksm::cmd::key::{cmd_key_with_projects, resolve_project_path};
 
 #[test]
@@ -51,7 +52,8 @@ fn test_cmd_key_with_print_path_returns_early() {
 
     // When print_path is true, the function should return Ok(()) without calling kitty functions
     // Since we can't easily mock kitty functions, we test that it doesn't panic or error
-    let result = cmd_key_with_projects("P1", true, &projects);
+    let app = App::new();
+    let result = cmd_key_with_projects(&app, "P1", true, &projects);
     assert!(result.is_ok());
 }
 
@@ -60,7 +62,8 @@ fn test_cmd_key_with_print_path_invalid_key() {
     let projects = vec![("P1".to_string(), "/test/path".to_string())];
 
     // Should return error for invalid key even with print_path=true
-    let result = cmd_key_with_projects("P99", true, &projects);
+    let app = App::new();
+    let result = cmd_key_with_projects(&app, "P99", true, &projects);
     assert!(result.is_err());
     assert!(
         result

@@ -3,13 +3,12 @@ use log::{debug, info, warn};
 use skim::prelude::*;
 use std::fs;
 use std::io::Cursor;
-use std::path::Path;
 
 use crate::config::get_all_directories;
-use crate::kitty::{create_session_tab_by_path, focus_tab, match_session_tab};
+use crate::app::App;
 use crate::utils::{expand_tilde, format_project_for_selection, parse_project_selection};
 
-pub fn cmd_select(is_work: bool) -> Result<()> {
+pub fn cmd_select(app: &App, is_work: bool) -> Result<()> {
     info!("Starting interactive project selection");
 
     let directories = get_all_directories(is_work)?;
@@ -74,15 +73,15 @@ pub fn cmd_select(is_work: bool) -> Result<()> {
                 );
 
                 // Check if session exists
-                match match_session_tab(&project_name) {
+                match app.kitty.match_session_tab(&project_name) {
                     Ok(Some(existing_tab)) => {
                         info!("Session already exists, focusing existing tab");
-                        focus_tab(existing_tab.id)?;
+                        app.kitty.focus_tab(existing_tab.id)?;
                         println!("Switched to existing session: {}", project_name);
                     }
                     _ => {
                         info!("No existing session found, creating new one");
-                        create_session_tab_by_path(&project_path, &project_name)?;
+                        app.kitty.create_session_tab_by_path(&project_path, &project_name)?;
                         println!(
                             "Created and switched to new session: {} ({})",
                             project_name, project_path
