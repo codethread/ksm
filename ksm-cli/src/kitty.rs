@@ -1,5 +1,5 @@
-use crate::kitty_lib::{KittenFocusTabCommand, KittenLaunchCommand, KittenLsCommand};
 use anyhow::Result;
+use kitty_lib::{KittenFocusTabCommand, KittenLaunchCommand, KittenLsCommand};
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 use std::env;
