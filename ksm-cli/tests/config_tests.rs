@@ -80,7 +80,7 @@ fn test_dirs_mixed_glob_and_regular_patterns() {
     fs::write(&config_file, config_content).unwrap();
 
     // Test mixed pattern expansion
-    let result = get_all_directories_from_path(Some(config_file), false).unwrap();
+    let result = get_all_directories_from_path(Some(config_file)).unwrap();
 
     // Should find: glob_project1, glob_project2, regular_project1, regular_project2, nested1, nested2
     assert_eq!(result.len(), 6);

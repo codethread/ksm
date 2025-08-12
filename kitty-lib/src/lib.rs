@@ -1,6 +1,7 @@
 use anyhow::Result;
-use log::debug;
+use log::{debug, warn};
 use std::cell::RefCell;
+use std::env;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Output};
 
@@ -16,11 +17,26 @@ pub trait CommandExecutor {
     ) -> Result<std::process::ExitStatus>;
 }
 
-pub struct KittyExecutor;
+pub struct KittyExecutor {
+    socket: String,
+}
+
+impl KittyExecutor {
+    pub fn new() -> Self {
+        let socket = get_kitty_socket();
+        Self { socket }
+    }
+}
+
+impl Default for KittyExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CommandExecutor for KittyExecutor {
     fn execute_ls_command(&self, command: KittenLsCommand) -> Result<Output> {
-        let socket_arg = format!("--to={}", command.socket);
+        let socket_arg = format!("--to={}", self.socket);
         let mut args = vec!["@", &socket_arg, "ls"];
 
         let match_formatted;
@@ -29,10 +45,10 @@ impl CommandExecutor for KittyExecutor {
             args.push(&match_formatted);
             debug!(
                 "Running kitten @ --to={} ls --match={}",
-                command.socket, match_arg
+                self.socket, match_arg
             );
         } else {
-            debug!("Running kitten @ --to={} ls", command.socket);
+            debug!("Running kitten @ --to={} ls", self.socket);
         }
 
         Ok(Command::new("kitten").args(&args).output()?)
@@ -42,23 +58,23 @@ impl CommandExecutor for KittyExecutor {
         &self,
         command: KittenFocusTabCommand,
     ) -> Result<std::process::ExitStatus> {
-        let socket_arg = format!("--to={}", command.socket);
+        let socket_arg = format!("--to={}", self.socket);
         let match_arg = format!("--match=id:{}", command.tab_id);
         let args = ["@", &socket_arg, "focus-tab", &match_arg];
 
         debug!(
             "Running kitten @ --to={} focus-tab --match=id:{}",
-            command.socket, command.tab_id
+            self.socket, command.tab_id
         );
 
-        Ok(Command::new("kitten").args(&args).status()?)
+        Ok(Command::new("kitten").args(args).status()?)
     }
 
     fn execute_launch_command(
         &self,
         command: KittenLaunchCommand,
     ) -> Result<std::process::ExitStatus> {
-        let socket_arg = format!("--to={}", command.socket);
+        let socket_arg = format!("--to={}", self.socket);
         let type_arg = format!("--type={}", command.launch_type);
         let mut args = vec!["@", &socket_arg, "launch", &type_arg];
 
@@ -81,7 +97,7 @@ impl CommandExecutor for KittyExecutor {
 
         debug!(
             "Running kitten @ --to={} launch --type={} {}{}{}",
-            command.socket,
+            self.socket,
             command.launch_type,
             command
                 .cwd
@@ -106,16 +122,18 @@ impl CommandExecutor for KittyExecutor {
 
 #[derive(Debug, Clone)]
 pub struct KittenLsCommand {
-    pub socket: String,
     pub match_arg: Option<String>,
 }
 
+impl Default for KittenLsCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KittenLsCommand {
-    pub fn new(socket: String) -> Self {
-        Self {
-            socket,
-            match_arg: None,
-        }
+    pub fn new() -> Self {
+        Self { match_arg: None }
     }
 
     pub fn match_env(mut self, env_var: &str, value: &str) -> Self {
@@ -126,29 +144,32 @@ impl KittenLsCommand {
 
 #[derive(Debug, Clone)]
 pub struct KittenFocusTabCommand {
-    pub socket: String,
     pub tab_id: u32,
 }
 
 impl KittenFocusTabCommand {
-    pub fn new(socket: String, tab_id: u32) -> Self {
-        Self { socket, tab_id }
+    pub fn new(tab_id: u32) -> Self {
+        Self { tab_id }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct KittenLaunchCommand {
-    pub socket: String,
     pub launch_type: String,
     pub cwd: Option<String>,
     pub env: Option<String>,
     pub tab_title: Option<String>,
 }
 
+impl Default for KittenLaunchCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KittenLaunchCommand {
-    pub fn new(socket: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            socket,
             launch_type: "tab".to_string(),
             cwd: None,
             env: None,
@@ -197,6 +218,10 @@ impl MockExecutor {
             focus_tab_responses: RefCell::new(Vec::new()),
             launch_responses: RefCell::new(Vec::new()),
         }
+    }
+
+    pub fn with_default_socket() -> Self {
+        Self::new()
     }
 
     pub fn expect_ls_response(&self, response: Result<Output>) {
@@ -267,6 +292,35 @@ impl CommandExecutor for &MockExecutor {
 
 impl Default for MockExecutor {
     fn default() -> Self {
-        Self::new()
+        Self::with_default_socket()
     }
+}
+
+fn get_kitty_socket() -> String {
+    if let Ok(socket) = env::var("KITTY_LISTEN_ON") {
+        debug!("Using KITTY_LISTEN_ON environment variable: {socket}");
+        return socket;
+    }
+
+    debug!("KITTY_LISTEN_ON not set, searching for socket files");
+
+    // Find socket file
+    if let Ok(output) = Command::new("sh")
+        .arg("-c")
+        .arg("ls /tmp/mykitty* 2>/dev/null | head -1")
+        .output()
+    {
+        if let Ok(socket_file) = String::from_utf8(output.stdout) {
+            let socket_file = socket_file.trim();
+            if !socket_file.is_empty() {
+                let socket_path = format!("unix:{}", socket_file);
+                debug!("Found socket file: {}", socket_path);
+                return socket_path;
+            }
+        }
+    }
+
+    let default_socket = "unix:/tmp/mykitty".to_string();
+    warn!("No socket file found, using default: {}", default_socket);
+    default_socket
 }

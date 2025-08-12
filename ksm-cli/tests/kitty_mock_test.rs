@@ -6,7 +6,7 @@ use std::process::{ExitStatus, Output};
 
 #[test]
 fn test_kitty_with_mock_executor() -> Result<()> {
-    let mock_executor = MockExecutor::new();
+    let mock_executor = MockExecutor::with_default_socket();
 
     // Setup mock response for ls command
     let mock_output = Output {
@@ -46,7 +46,7 @@ fn test_kitty_with_mock_executor() -> Result<()> {
 
 #[test]
 fn test_kitty_mock_no_matching_tabs() -> Result<()> {
-    let mock_executor = MockExecutor::new();
+    let mock_executor = MockExecutor::with_default_socket();
 
     // Setup mock response for ls command with no matching tabs
     let mock_output = Output {
@@ -70,7 +70,7 @@ fn test_kitty_mock_no_matching_tabs() -> Result<()> {
 
 #[test]
 fn test_kitty_mock_create_session() -> Result<()> {
-    let mock_executor = MockExecutor::new();
+    let mock_executor = MockExecutor::with_default_socket();
 
     // Setup mock response for launch command
     mock_executor.expect_launch_response(Ok(ExitStatus::from_raw(0)));

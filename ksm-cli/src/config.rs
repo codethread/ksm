@@ -82,13 +82,10 @@ pub fn get_keyed_projects_from_path(
 }
 
 pub fn get_all_directories(_is_work: bool) -> Result<Vec<String>> {
-    get_all_directories_from_path(None, _is_work)
+    get_all_directories_from_path(None)
 }
 
-pub fn get_all_directories_from_path(
-    config_path: Option<PathBuf>,
-    _is_work: bool,
-) -> Result<Vec<String>> {
+pub fn get_all_directories_from_path(config_path: Option<PathBuf>) -> Result<Vec<String>> {
     let config = load_config_from_path(config_path)?;
     let mut expanded_dirs = Vec::new();
 

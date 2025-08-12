@@ -2,10 +2,8 @@ use anyhow::Result;
 use kitty_lib::{
     CommandExecutor, KittenFocusTabCommand, KittenLaunchCommand, KittenLsCommand, KittyExecutor,
 };
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use serde::Deserialize;
-use std::env;
-use std::process::Command;
 
 #[derive(Debug, Deserialize)]
 pub struct KittyTab {
@@ -17,65 +15,33 @@ pub struct KittyWindow {
     pub tabs: Vec<KittyTab>,
 }
 
-fn get_kitty_socket() -> String {
-    if let Ok(socket) = env::var("KITTY_LISTEN_ON") {
-        debug!("Using KITTY_LISTEN_ON environment variable: {socket}");
-        return socket;
-    }
-
-    debug!("KITTY_LISTEN_ON not set, searching for socket files");
-
-    // Find socket file
-    if let Ok(output) = Command::new("sh")
-        .arg("-c")
-        .arg("ls /tmp/mykitty* 2>/dev/null | head -1")
-        .output()
-    {
-        if let Ok(socket_file) = String::from_utf8(output.stdout) {
-            let socket_file = socket_file.trim();
-            if !socket_file.is_empty() {
-                let socket_path = format!("unix:{}", socket_file);
-                debug!("Found socket file: {}", socket_path);
-                return socket_path;
-            }
-        }
-    }
-
-    let default_socket = "unix:/tmp/mykitty".to_string();
-    warn!("No socket file found, using default: {}", default_socket);
-    default_socket
+pub struct Kitty<E: CommandExecutor> {
+    executor: E,
 }
 
-pub struct Kitty<E: CommandExecutor> {
-    socket: String,
-    executor: E,
+impl Default for Kitty<KittyExecutor> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Kitty<KittyExecutor> {
     pub fn new() -> Self {
-        let socket = get_kitty_socket();
         Self {
-            socket,
-            executor: KittyExecutor,
+            executor: KittyExecutor::new(),
         }
     }
 }
 
 impl<E: CommandExecutor> Kitty<E> {
     pub fn with_executor(executor: E) -> Self {
-        let socket = get_kitty_socket();
-        Self { socket, executor }
-    }
-
-    pub fn socket(&self) -> &str {
-        &self.socket
+        Self { executor }
     }
 
     pub fn match_session_tab(&self, project_name: &str) -> Result<Option<KittyTab>> {
         debug!("Matching session tab for project: {}", project_name);
 
-        let command = KittenLsCommand::new(self.socket.clone())
-            .match_env("KITTY_SESSION_PROJECT", project_name);
+        let command = KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", project_name);
         let output = self.executor.execute_ls_command(command)?;
 
         if !output.status.success() {
@@ -110,7 +76,7 @@ impl<E: CommandExecutor> Kitty<E> {
 
         info!("Focusing tab with id: {}", tab_id);
 
-        let command = KittenFocusTabCommand::new(self.socket.clone(), tab_id);
+        let command = KittenFocusTabCommand::new(tab_id);
         let status = self.executor.execute_focus_tab_command(command)?;
 
         if !status.success() {
@@ -132,7 +98,7 @@ impl<E: CommandExecutor> Kitty<E> {
 
         let session_name = format!("📁 {}", project_name);
 
-        let command = KittenLaunchCommand::new(self.socket.clone())
+        let command = KittenLaunchCommand::new()
             .launch_type("tab")
             .cwd(project_path)
             .env("KITTY_SESSION_PROJECT", project_name)
