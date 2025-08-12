@@ -40,7 +40,7 @@ impl<E: CommandExecutor> Kitty<E> {
         }
 
         for os_window in os_windows {
-            for tab in os_window.tabs {
+            if let Some(tab) = os_window.tabs.into_iter().next() {
                 info!(
                     "Found existing session tab for project '{}' with id: {}",
                     project_name, tab.id

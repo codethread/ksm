@@ -53,3 +53,5 @@ This is a Rust workspace with two main packages:
 - Unit tests use `MockExecutor` to simulate Kitty interactions
 - Integration tests in `/tests/` directory
 - CLI tests verify argument parsing and command routing
+
+- please run `just ci` and fix all issues before considering a job as complete
