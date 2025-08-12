@@ -16,7 +16,7 @@ pub struct KittyWindow {
 }
 
 pub struct Kitty<E: CommandExecutor> {
-    executor: E,
+    kitty: E,
 }
 
 impl Default for Kitty<KittyExecutor> {
@@ -28,21 +28,21 @@ impl Default for Kitty<KittyExecutor> {
 impl Kitty<KittyExecutor> {
     pub fn new() -> Self {
         Self {
-            executor: KittyExecutor::new(),
+            kitty: KittyExecutor::new(),
         }
     }
 }
 
 impl<E: CommandExecutor> Kitty<E> {
     pub fn with_executor(executor: E) -> Self {
-        Self { executor }
+        Self { kitty: executor }
     }
 
     pub fn match_session_tab(&self, project_name: &str) -> Result<Option<KittyTab>> {
         debug!("Matching session tab for project: {}", project_name);
 
-        let command = KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", project_name);
-        let output = self.executor.execute_ls_command(command)?;
+        let ls_command = KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", project_name);
+        let output = self.kitty.ls(ls_command)?;
 
         if !output.status.success() {
             debug!("No matching session found for project: {}", project_name);
@@ -76,8 +76,8 @@ impl<E: CommandExecutor> Kitty<E> {
 
         info!("Focusing tab with id: {}", tab_id);
 
-        let command = KittenFocusTabCommand::new(tab_id);
-        let status = self.executor.execute_focus_tab_command(command)?;
+        let focus_command = KittenFocusTabCommand::new(tab_id);
+        let status = self.kitty.focus_tab(focus_command)?;
 
         if !status.success() {
             error!("Failed to focus tab {}", tab_id);
@@ -98,12 +98,12 @@ impl<E: CommandExecutor> Kitty<E> {
 
         let session_name = format!("📁 {}", project_name);
 
-        let command = KittenLaunchCommand::new()
+        let launch_command = KittenLaunchCommand::new()
             .launch_type("tab")
             .cwd(project_path)
             .env("KITTY_SESSION_PROJECT", project_name)
             .tab_title(&session_name);
-        let status = self.executor.execute_launch_command(command)?;
+        let status = self.kitty.launch(launch_command)?;
 
         if !status.success() {
             error!(
