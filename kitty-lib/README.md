@@ -8,27 +8,29 @@ The library follows a command pattern with dependency injection to enable easy t
 
 ### Core Components
 
-1. **Command Structs**: Pure data holders that represent Kitty commands
-
+1. **Command Structs** (`src/commands/`): Pure data holders that represent Kitty commands
    - `KittenLsCommand` - List windows and tabs
-   - `KittenFocusTabCommand` - Focus a specific tab
+   - `KittenFocusTabCommand` - Focus a specific tab  
    - `KittenLaunchCommand` - Launch new tabs/windows
 
-2. **CommandExecutor Trait**: Abstraction for command execution
-
-   - Enables dependency injection
+2. **CommandExecutor Trait** (`src/executor/mod.rs`): Abstraction for command execution
+   - Enables dependency injection and testability
    - Allows different implementations for production vs testing
 
-3. **Executors**:
+3. **Executors** (`src/executor/`):
    - `KittyExecutor` - Production implementation that calls actual `kitten` commands
-   - `MockExecutor` - Test implementation for unit testing
+   - `MockExecutor` - Test implementation with call tracking and configurable responses
+
+4. **Types** (`src/types.rs`): Shared data structures for Kitty objects
+5. **Utilities** (`src/utils.rs`): Helper functions for common operations
 
 ## Usage
 
 ### Basic Usage (Production)
 
 ```rust
-use kitty_lib::{KittyExecutor, KittenLsCommand, CommandExecutor};
+use kitty_lib::executor::{KittyExecutor, CommandExecutor};
+use kitty_lib::commands::KittenLsCommand;
 
 let executor = KittyExecutor;
 let command = KittenLsCommand::new("unix:/tmp/mykitty".to_string())
@@ -40,7 +42,8 @@ let output = executor.execute_ls_command(command)?;
 ### Testing with MockExecutor
 
 ```rust
-use kitty_lib::{MockExecutor, KittenLsCommand, CommandExecutor};
+use kitty_lib::executor::{MockExecutor, CommandExecutor};
+use kitty_lib::commands::KittenLsCommand;
 use std::process::{Output, ExitStatus};
 use std::os::unix::process::ExitStatusExt;
 
@@ -136,7 +139,8 @@ let launch_calls = mock.get_launch_calls();
 This library is designed to be used by higher-level APIs that provide more convenient interfaces:
 
 ```rust
-use kitty_lib::{CommandExecutor, KittyExecutor};
+use kitty_lib::executor::{CommandExecutor, KittyExecutor};
+use kitty_lib::commands::KittenLsCommand;
 
 pub struct Kitty<E: CommandExecutor> {
     socket: String,
@@ -184,9 +188,35 @@ All executor methods return `anyhow::Result<T>` for comprehensive error handling
 - Unix-like system (uses Unix domain sockets)
 - Rust 2021 edition or later
 
+## Development
+
+This library is part of a Rust workspace. Use the justfile at the workspace root for development:
+
+```bash
+# Library-specific commands
+just test-lib                # Run library tests only  
+just check-lib               # Quick validation of library only
+just build-lib               # Build library release version
+just lint-lib                # Run clippy on library only
+
+# Workspace-wide commands
+just ci                      # Run all checks (format, lint, test)
+just test                    # Run all workspace tests
+just fmt                     # Format all code
+```
+
+You can also use cargo directly:
+
+```bash
+# Run with cargo (from workspace root)
+cargo test --package kitty-lib
+cargo check --package kitty-lib
+cargo build --package kitty-lib
+```
+
 ## Dependencies
 
 - `anyhow` - Error handling
-- `log` - Logging
+- `log` - Logging  
 - `std::process` - Command execution
 - `std::cell::RefCell` - Interior mutability for mock state

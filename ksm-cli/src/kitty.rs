@@ -1,19 +1,9 @@
 use anyhow::Result;
 use kitty_lib::{
     CommandExecutor, KittenFocusTabCommand, KittenLaunchCommand, KittenLsCommand, KittyExecutor,
+    KittyTab,
 };
 use log::{debug, error, info};
-use serde::Deserialize;
-
-#[derive(Debug, Deserialize)]
-pub struct KittyTab {
-    pub id: u32,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct KittyWindow {
-    pub tabs: Vec<KittyTab>,
-}
 
 pub struct Kitty<E: CommandExecutor> {
     kitty: E,
@@ -42,20 +32,15 @@ impl<E: CommandExecutor> Kitty<E> {
         debug!("Matching session tab for project: {}", project_name);
 
         let ls_command = KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", project_name);
-        let output = self.kitty.ls(ls_command)?;
+        let os_windows = self.kitty.ls(ls_command)?;
 
-        if !output.status.success() {
+        if os_windows.is_empty() {
             debug!("No matching session found for project: {}", project_name);
             return Ok(None);
         }
 
-        let windows: Vec<KittyWindow> = serde_json::from_slice(&output.stdout).map_err(|e| {
-            error!("Failed to parse kitten ls output: {}", e);
-            e
-        })?;
-
-        for window in windows {
-            if let Some(tab) = window.tabs.into_iter().next() {
+        for os_window in os_windows {
+            for tab in os_window.tabs {
                 info!(
                     "Found existing session tab for project '{}' with id: {}",
                     project_name, tab.id
@@ -72,16 +57,21 @@ impl<E: CommandExecutor> Kitty<E> {
     }
 
     pub fn focus_tab(&self, tab_id: u32) -> Result<()> {
-        use anyhow::anyhow;
-
         info!("Focusing tab with id: {}", tab_id);
 
         let focus_command = KittenFocusTabCommand::new(tab_id);
-        let status = self.kitty.focus_tab(focus_command)?;
+        let result = self.kitty.focus_tab(focus_command)?;
 
-        if !status.success() {
-            error!("Failed to focus tab {}", tab_id);
-            return Err(anyhow!("Failed to focus tab {}", tab_id));
+        if !result.is_success() {
+            let error_msg = result
+                .error_message
+                .unwrap_or_else(|| "Unknown error".to_string());
+            error!("Failed to focus tab {}: {}", tab_id, error_msg);
+            return Err(anyhow::anyhow!(
+                "Failed to focus tab {}: {}",
+                tab_id,
+                error_msg
+            ));
         }
 
         info!("Successfully focused tab: {}", tab_id);
@@ -89,8 +79,6 @@ impl<E: CommandExecutor> Kitty<E> {
     }
 
     pub fn create_session_tab_by_path(&self, project_path: &str, project_name: &str) -> Result<()> {
-        use anyhow::anyhow;
-
         info!(
             "Creating new session tab for project '{}' at path: {}",
             project_name, project_path
@@ -103,14 +91,20 @@ impl<E: CommandExecutor> Kitty<E> {
             .cwd(project_path)
             .env("KITTY_SESSION_PROJECT", project_name)
             .tab_title(&session_name);
-        let status = self.kitty.launch(launch_command)?;
+        let result = self.kitty.launch(launch_command)?;
 
-        if !status.success() {
+        if !result.is_success() {
+            let error_msg = result
+                .error_message
+                .unwrap_or_else(|| "Unknown error".to_string());
             error!(
-                "Failed to create session tab for project '{}'",
-                project_name
+                "Failed to create session tab for project '{}': {}",
+                project_name, error_msg
             );
-            return Err(anyhow!("Failed to create session tab"));
+            return Err(anyhow::anyhow!(
+                "Failed to create session tab: {}",
+                error_msg
+            ));
         }
 
         info!(

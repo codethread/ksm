@@ -1,47 +1,62 @@
-# ksm-cli Developer Guide
+# ksm-cli
 
-This README is for developers working on the ksm codebase.
+The main CLI application for the Kitty Session Manager. This package provides the command-line interface for managing Kitty terminal sessions and project switching.
 
-## Project Structure
+## Architecture
 
-```
-src/
-├── cli.rs          # Command-line interface definitions
-├── cmd/            # Command implementations
-│   ├── mod.rs      # Module exports
-│   ├── key.rs      # Key-based project switching
-│   ├── list.rs     # List available sessions
-│   └── select.rs   # Interactive project selection
-├── config.rs       # Configuration loading and management
-├── kitty.rs        # Kitty terminal integration
-├── utils.rs        # Utility functions
-├── lib.rs          # Library exports
-├── app.rs          # Application logic
-└── main.rs         # Application entry point
+### Core Components
 
-tests/
-├── config_tests.rs      # Configuration tests
-├── key_tests.rs         # Key command tests
-├── kitty_mock_test.rs   # Kitty integration tests
-└── utils_tests.rs       # Utility function tests
-```
+- **`main.rs`**: Application entry point and CLI setup
+- **`app.rs`**: Main application logic and coordination
+- **`cli.rs`**: Command-line interface definitions using clap
+- **`config.rs`**: Configuration file loading and session management
+- **`kitty.rs`**: High-level Kitty terminal integration wrapper
+- **`utils.rs`**: Shared utility functions
 
-## Development Commands
+### Commands (`src/cmd/`)
 
-Since this is part of a Rust workspace, use these commands for development:
+Each command is implemented as a separate module:
+
+- **`key.rs`**: Switch to projects using predefined keys
+- **`list.rs`**: List all available sessions and projects  
+- **`select.rs`**: Interactive project selection with fuzzy finding
+
+### Testing
+
+- **Unit tests**: Embedded in source files using `#[cfg(test)]`
+- **Integration tests**: Located in `tests/` directory
+- **Mock-based testing**: Uses `kitty-lib`'s `MockExecutor` for testing Kitty interactions
+
+## Development
+
+This package is part of a Rust workspace. Use the justfile at the workspace root for development:
 
 ```bash
-# Run the application
-cargo run -p ksm -- --help
+# Run the CLI
+just help                    # Show CLI help
+just list                    # Run list command
+just select                  # Run select command  
+just key <keyname>           # Run key command
 
-# Run tests
-cargo test
+# Development commands
+just test-cli                # Run CLI tests only
+just check-cli               # Quick validation of CLI only
+just build-cli               # Build CLI release version
+just lint-cli                # Run clippy on CLI only
 
-# Quick validation
-cargo check
+# Workspace-wide commands (affects both CLI and library)
+just ci                      # Run all checks (format, lint, test)
+just test                    # Run all workspace tests
+just fmt                     # Format all code
+```
 
-# Build release
-cargo build --release -p ksm
+You can also use cargo directly:
+
+```bash
+# Run with cargo (from workspace root)
+cargo run --package ksm -- --help
+cargo test --package ksm
+cargo check --package ksm
 ```
 
 ## Dependencies

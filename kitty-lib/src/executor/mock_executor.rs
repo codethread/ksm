@@ -1,21 +1,20 @@
 use anyhow::Result;
 use std::cell::RefCell;
-use std::os::unix::process::ExitStatusExt;
-use std::process::{ExitStatus, Output};
 
 use crate::commands::focus_tab::KittenFocusTabCommand;
 use crate::commands::launch::KittenLaunchCommand;
 use crate::commands::ls::KittenLsCommand;
 use crate::executor::CommandExecutor;
+use crate::types::{KittyCommandResult, KittyLaunchResponse, KittyLsResponse};
 
 #[derive(Debug)]
 pub struct MockExecutor {
     pub ls_calls: RefCell<Vec<KittenLsCommand>>,
     pub focus_tab_calls: RefCell<Vec<KittenFocusTabCommand>>,
     pub launch_calls: RefCell<Vec<KittenLaunchCommand>>,
-    pub ls_responses: RefCell<Vec<Result<Output>>>,
-    pub focus_tab_responses: RefCell<Vec<Result<ExitStatus>>>,
-    pub launch_responses: RefCell<Vec<Result<ExitStatus>>>,
+    pub ls_responses: RefCell<Vec<Result<KittyLsResponse>>>,
+    pub focus_tab_responses: RefCell<Vec<Result<KittyCommandResult<()>>>>,
+    pub launch_responses: RefCell<Vec<Result<KittyCommandResult<KittyLaunchResponse>>>>,
 }
 
 impl MockExecutor {
@@ -34,15 +33,18 @@ impl MockExecutor {
         Self::new()
     }
 
-    pub fn expect_ls_response(&self, response: Result<Output>) {
+    pub fn expect_ls_response(&self, response: Result<KittyLsResponse>) {
         self.ls_responses.borrow_mut().push(response);
     }
 
-    pub fn expect_focus_tab_response(&self, response: Result<ExitStatus>) {
+    pub fn expect_focus_tab_response(&self, response: Result<KittyCommandResult<()>>) {
         self.focus_tab_responses.borrow_mut().push(response);
     }
 
-    pub fn expect_launch_response(&self, response: Result<ExitStatus>) {
+    pub fn expect_launch_response(
+        &self,
+        response: Result<KittyCommandResult<KittyLaunchResponse>>,
+    ) {
         self.launch_responses.borrow_mut().push(response);
     }
 
@@ -72,35 +74,35 @@ impl MockExecutor {
 }
 
 impl CommandExecutor for &MockExecutor {
-    fn ls(&self, command: KittenLsCommand) -> Result<Output> {
+    fn ls(&self, command: KittenLsCommand) -> Result<KittyLsResponse> {
         self.ls_calls.borrow_mut().push(command);
         let response = self.ls_responses.borrow_mut().pop().unwrap_or_else(|| {
-            Ok(Output {
-                status: ExitStatus::from_raw(0),
-                stdout: b"[]".to_vec(),
-                stderr: Vec::new(),
-            })
+            Ok(Vec::new()) // Return empty list by default
         });
         response
     }
 
-    fn focus_tab(&self, command: KittenFocusTabCommand) -> Result<ExitStatus> {
+    fn focus_tab(&self, command: KittenFocusTabCommand) -> Result<KittyCommandResult<()>> {
         self.focus_tab_calls.borrow_mut().push(command);
         let response = self
             .focus_tab_responses
             .borrow_mut()
             .pop()
-            .unwrap_or_else(|| Ok(ExitStatus::from_raw(0)));
+            .unwrap_or_else(|| Ok(KittyCommandResult::success_empty()));
         response
     }
 
-    fn launch(&self, command: KittenLaunchCommand) -> Result<ExitStatus> {
+    fn launch(
+        &self,
+        command: KittenLaunchCommand,
+    ) -> Result<KittyCommandResult<KittyLaunchResponse>> {
         self.launch_calls.borrow_mut().push(command);
-        let response = self
-            .launch_responses
-            .borrow_mut()
-            .pop()
-            .unwrap_or_else(|| Ok(ExitStatus::from_raw(0)));
+        let response = self.launch_responses.borrow_mut().pop().unwrap_or_else(|| {
+            Ok(KittyCommandResult::success(KittyLaunchResponse {
+                tab_id: None,
+                window_id: None,
+            }))
+        });
         response
     }
 }

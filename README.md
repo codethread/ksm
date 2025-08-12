@@ -17,7 +17,11 @@ ksm allows you to quickly switch between project directories by creating and man
 ## Installation
 
 ```bash
+# Install from source
 cargo install --path ksm-cli
+
+# Or use the justfile
+just install
 ```
 
 ## Commands
@@ -71,9 +75,31 @@ Each project entry is a `[key, path]` pair where:
 - `key`: Short identifier for quick access
 - `path`: Full or tilde-expanded path to the project directory
 
+## Development
+
+This project uses a Rust workspace with two main packages:
+
+- **`ksm-cli`**: The main CLI application
+- **`kitty-lib`**: Reusable library for Kitty terminal integration
+
+See the justfile for available development commands:
+
+```bash
+just --list     # Show all available commands
+just ci         # Run comprehensive checks (format, lint, test)
+just test       # Run all tests
+just lint       # Run clippy linter
+just fmt        # Format code
+```
+
+See individual package READMEs for more details:
+- [ksm-cli/README.md](ksm-cli/README.md) - CLI development guide
+- [kitty-lib/README.md](kitty-lib/README.md) - Library architecture and API
+
 ## Requirements
 
 - Kitty terminal emulator
+- Rust toolchain
 
 ## Environment Variables
 
