@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow};
 use log::{debug, error, info};
 use std::path::Path;
 
-use crate::config::{KeyedProject, get_keyed_projects};
 use crate::app::App;
+use crate::config::{KeyedProject, get_keyed_projects};
 use crate::utils::expand_tilde;
 
 pub fn cmd_key(app: &App, key: &str, is_work: bool, print_path: bool) -> Result<()> {
@@ -48,7 +48,8 @@ pub fn cmd_key_with_projects(
     }
 
     info!("No existing session found, creating new one");
-    app.kitty.create_session_tab_by_path(&expanded_path, project_name)
+    app.kitty
+        .create_session_tab_by_path(&expanded_path, project_name)
 }
 
 pub fn resolve_project_path(key: &str, keyed_projects: &[KeyedProject]) -> Result<String> {

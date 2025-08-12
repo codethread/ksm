@@ -1,7 +1,8 @@
 use crate::kitty::Kitty;
+use kitty_lib::KittyExecutor;
 
 pub struct App {
-    pub kitty: Kitty,
+    pub kitty: Kitty<KittyExecutor>,
 }
 
 impl App {

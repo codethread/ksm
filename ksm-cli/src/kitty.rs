@@ -1,5 +1,7 @@
 use anyhow::Result;
-use kitty_lib::{KittenFocusTabCommand, KittenLaunchCommand, KittenLsCommand};
+use kitty_lib::{
+    CommandExecutor, KittenFocusTabCommand, KittenLaunchCommand, KittenLsCommand, KittyExecutor,
+};
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 use std::env;
@@ -44,14 +46,25 @@ fn get_kitty_socket() -> String {
     default_socket
 }
 
-pub struct Kitty {
+pub struct Kitty<E: CommandExecutor> {
     socket: String,
+    executor: E,
 }
 
-impl Kitty {
+impl Kitty<KittyExecutor> {
     pub fn new() -> Self {
         let socket = get_kitty_socket();
-        Self { socket }
+        Self {
+            socket,
+            executor: KittyExecutor,
+        }
+    }
+}
+
+impl<E: CommandExecutor> Kitty<E> {
+    pub fn with_executor(executor: E) -> Self {
+        let socket = get_kitty_socket();
+        Self { socket, executor }
     }
 
     pub fn socket(&self) -> &str {
@@ -61,9 +74,9 @@ impl Kitty {
     pub fn match_session_tab(&self, project_name: &str) -> Result<Option<KittyTab>> {
         debug!("Matching session tab for project: {}", project_name);
 
-        let output = KittenLsCommand::new(self.socket.clone())
-            .match_env("KITTY_SESSION_PROJECT", project_name)
-            .execute()?;
+        let command = KittenLsCommand::new(self.socket.clone())
+            .match_env("KITTY_SESSION_PROJECT", project_name);
+        let output = self.executor.execute_ls_command(command)?;
 
         if !output.status.success() {
             debug!("No matching session found for project: {}", project_name);
@@ -97,7 +110,8 @@ impl Kitty {
 
         info!("Focusing tab with id: {}", tab_id);
 
-        let status = KittenFocusTabCommand::new(self.socket.clone(), tab_id).execute()?;
+        let command = KittenFocusTabCommand::new(self.socket.clone(), tab_id);
+        let status = self.executor.execute_focus_tab_command(command)?;
 
         if !status.success() {
             error!("Failed to focus tab {}", tab_id);
@@ -118,12 +132,12 @@ impl Kitty {
 
         let session_name = format!("📁 {}", project_name);
 
-        let status = KittenLaunchCommand::new(self.socket.clone())
+        let command = KittenLaunchCommand::new(self.socket.clone())
             .launch_type("tab")
             .cwd(project_path)
             .env("KITTY_SESSION_PROJECT", project_name)
-            .tab_title(&session_name)
-            .execute()?;
+            .tab_title(&session_name);
+        let status = self.executor.execute_launch_command(command)?;
 
         if !status.success() {
             error!(

@@ -1,6 +1,6 @@
 # ksm (kitty session manager)
 
-A Rust based Kitty Session Manager to emulate tmux style project sessionsk within the Kitty terminal emulator.
+A Rust based Kitty Session Manager to emulate tmux style project sessions within the Kitty terminal emulator.
 
 ## Overview
 
@@ -13,6 +13,12 @@ ksm allows you to quickly switch between project directories by creating and man
 - **Session management**: Automatically create or focus existing project tabs
 - **Work/Personal contexts**: Separate project sets for different contexts
 - **Project discovery**: Automatically find projects in configured directories
+
+## Installation
+
+```bash
+cargo install --path ksm-cli
+```
 
 ## Commands
 
@@ -65,34 +71,9 @@ Each project entry is a `[key, path]` pair where:
 - `key`: Short identifier for quick access
 - `path`: Full or tilde-expanded path to the project directory
 
-## Project Structure (guide)
-
-```
-src/
-├── cli.rs          # Command-line interface definitions
-├── cmd/            # Command implementations (etc)
-│   ├── mod.rs      # Module exports
-│   └── select.rs   # Interactive project selection
-├── config.rs       # Configuration loading and management
-├── kitty.rs        # Kitty terminal integration
-├── utils.rs        # Utility functions
-├── lib.rs          # Library exports
-└── main.rs         # Application entry point
-
-tests/
-└── utils_tests.rs  # Utility function tests (etc)
-```
-
-## Installation
-
-```bash
-cargo install --path .
-```
-
 ## Requirements
 
 - Kitty terminal emulator
-- Rust toolchain for building
 
 ## Environment Variables
 

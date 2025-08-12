@@ -4,8 +4,8 @@ use skim::prelude::*;
 use std::fs;
 use std::io::Cursor;
 
-use crate::config::get_all_directories;
 use crate::app::App;
+use crate::config::get_all_directories;
 use crate::utils::{expand_tilde, format_project_for_selection, parse_project_selection};
 
 pub fn cmd_select(app: &App, is_work: bool) -> Result<()> {
@@ -81,7 +81,8 @@ pub fn cmd_select(app: &App, is_work: bool) -> Result<()> {
                     }
                     _ => {
                         info!("No existing session found, creating new one");
-                        app.kitty.create_session_tab_by_path(&project_path, &project_name)?;
+                        app.kitty
+                            .create_session_tab_by_path(&project_path, &project_name)?;
                         println!(
                             "Created and switched to new session: {} ({})",
                             project_name, project_path
