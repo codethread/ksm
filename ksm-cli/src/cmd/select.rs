@@ -5,13 +5,14 @@ use std::fs;
 use std::io::Cursor;
 
 use crate::app::App;
-use crate::config::get_all_directories;
+use crate::config::Config;
 use crate::utils::{expand_tilde, format_project_for_selection, parse_project_selection};
 
-pub fn cmd_select(app: &App, is_work: bool) -> Result<()> {
+pub fn cmd_select(app: &App, _is_work: bool) -> Result<()> {
     info!("Starting interactive project selection");
 
-    let directories = get_all_directories(is_work)?;
+    let config = Config::load()?;
+    let directories = config.expanded_directories()?;
     let projects = get_projects(directories)?;
 
     if projects.is_empty() {

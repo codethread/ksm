@@ -1,39 +1,109 @@
-use ksm::config::{SessionConfig, get_all_directories_from_path, get_keyed_projects_from_config};
+use ksm::config::{Config, get_all_directories_from_path};
 use std::fs;
 use std::path::PathBuf;
 
 #[test]
-fn test_get_keyed_projects_personal() {
-    let config = SessionConfig {
-        dirs: vec![],
-        dirs_special: None,
-        base: vec![("P0".to_string(), "~/base".to_string())],
-        personal: vec![("P1".to_string(), "~/personal".to_string())],
-        work: vec![("P2".to_string(), "~/work".to_string())],
-    };
+fn test_config_keyed_projects_personal() {
+    // Create a test config file
+    let temp_dir = std::env::temp_dir().join("ksm_test_config_personal");
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).unwrap();
 
-    let projects = get_keyed_projects_from_config(&config, false);
+    let config_content = r#"{
+        "dirs": [],
+        "base": [["P0", "~/base"]],
+        "personal": [["P1", "~/personal"]],
+        "work": [["P2", "~/work"]]
+    }"#;
+
+    let config_file = temp_dir.join("test_config.json");
+    fs::write(&config_file, config_content).unwrap();
+
+    let config = Config::load_from_path(Some(config_file)).unwrap();
+    let projects = config.keyed_projects(false);
+
     assert_eq!(projects.len(), 2);
     assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
     assert!(projects.contains(&("P1".to_string(), "~/personal".to_string())));
     assert!(!projects.contains(&("P2".to_string(), "~/work".to_string())));
+
+    // Clean up
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
-fn test_get_keyed_projects_work() {
-    let config = SessionConfig {
-        dirs: vec![],
-        dirs_special: None,
-        base: vec![("P0".to_string(), "~/base".to_string())],
-        personal: vec![("P1".to_string(), "~/personal".to_string())],
-        work: vec![("P2".to_string(), "~/work".to_string())],
-    };
+fn test_config_keyed_projects_work() {
+    // Create a test config file
+    let temp_dir = std::env::temp_dir().join("ksm_test_config_work");
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).unwrap();
 
-    let projects = get_keyed_projects_from_config(&config, true);
+    let config_content = r#"{
+        "dirs": [],
+        "base": [["P0", "~/base"]],
+        "personal": [["P1", "~/personal"]],
+        "work": [["P2", "~/work"]]
+    }"#;
+
+    let config_file = temp_dir.join("test_config.json");
+    fs::write(&config_file, config_content).unwrap();
+
+    let config = Config::load_from_path(Some(config_file)).unwrap();
+    let projects = config.keyed_projects(true);
+
     assert_eq!(projects.len(), 2);
     assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
     assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
     assert!(!projects.contains(&("P1".to_string(), "~/personal".to_string())));
+
+    // Clean up
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn test_config_expanded_directories() {
+    // Create a temporary directory structure for testing
+    let temp_dir = std::env::temp_dir().join("ksm_test_config_expanded");
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // Create test directories
+    fs::create_dir_all(temp_dir.join("project1")).unwrap();
+    fs::create_dir_all(temp_dir.join("project2")).unwrap();
+
+    let config_content = format!(
+        r#"{{
+            "dirs": ["{}/project*"],
+            "base": [],
+            "personal": [],
+            "work": []
+        }}"#,
+        temp_dir.display()
+    );
+
+    let config_file = temp_dir.join("test_config.json");
+    fs::write(&config_file, config_content).unwrap();
+
+    let config = Config::load_from_path(Some(config_file)).unwrap();
+    let directories = config.expanded_directories().unwrap();
+
+    assert_eq!(directories.len(), 2);
+    let dir_names: Vec<String> = directories
+        .iter()
+        .map(|p| {
+            PathBuf::from(p)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+
+    assert!(dir_names.contains(&"project1".to_string()));
+    assert!(dir_names.contains(&"project2".to_string()));
+
+    // Clean up
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]

@@ -22,30 +22,26 @@ cargo install --path ksm-cli
 
 # Or use the justfile
 just install
-```
 
-## Commands
-
-```bash
+# Then
 ksm --help
-
-# List all available sessions
-ksm list  # or: ksm ls
-
-# Switch to project by key
-ksm key <key> [--work]  # or: ksm k <key> [--work]
-
-# Interactive project selection
-ksm select [--work]  # or: ksm s [--work]
 ```
 
 ## Configuration
+
+> [!INFO]
+> The `KSM_WORK` env (when set to a truthy value) enables the work context for all commands.
 
 Create a configuration file at `~/.local/data/sessions.json`:
 
 ```json
 {
-  "dirs": ["~/dev/projects", "~/work/*", "~/personal/code"],
+  "dirs": [
+    "~/dev/projects/*",
+    "~/work/*/projects",
+    "~/personal/code",
+    "~/code/**/*-project"
+  ],
   "base": [
     ["config", "~/.config"],
     ["dots", "~/dotfiles"]
@@ -63,12 +59,30 @@ Create a configuration file at `~/.local/data/sessions.json`:
 
 ### Configuration Structure
 
-- **`dirs`**: Array of directories to scan for projects
-  - **`~/dev/projects`**: Scan all directories within `~/dev/projects`, e.g `~/dev/projects/project1`, `~/dev/projects/project2`
-  - **`~/work/*`**: Scan all _subdirectories_ within `~/work`, e.g `~/work/fe/project1`, `~/work/fe/project2`, `~/work/be/project1`, `~/work/be/project2`
+- **`dirs`**: Array of directory patterns to scan for projects (supports glob patterns)
+  - **`~/dev/projects/*`**: Match all direct subdirectories in `~/dev/projects` (e.g., `~/dev/projects/project1`, `~/dev/projects/project2`)
+  - **`~/work/*/projects`**: Match directories named `projects` in any subdirectory of `~/work` (e.g., `~/work/team1/projects`, `~/work/team2/projects`)
+  - **`~/personal/code`**: Literal directory path (no glob expansion)
+  - **`~/code/**/*-project`**: Match any directory ending in `-project` at any depth under `~/code` using recursive glob
 - **`base`**: Key-value pairs available in both work and personal contexts
 - **`personal`**: Key-value pairs available only in personal context
-- **`work`**: Key-value pairs available only in work context (use `--work` flag)
+- **`work`**: Key-value pairs available only in work context
+
+#### Glob Pattern Support
+
+The `dirs` configuration supports standard glob patterns:
+
+- **`*`**: Matches any number of characters within a directory name (non-recursive)
+- **`**`**: Matches any number of directories recursively
+- **`?`**: Matches exactly one character
+- **`[abc]`**: Matches any one character in the set
+- **`[!abc]`**: Matches any one character not in the set
+
+**Examples:**
+- `~/projects/*` → `~/projects/web-app`, `~/projects/api-service`
+- `~/code/**/*.git` → Any `.git` directory at any depth under `~/code`
+- `~/work/team[12]/src` → `~/work/team1/src`, `~/work/team2/src`
+- `~/dev/project-*` → `~/dev/project-alpha`, `~/dev/project-beta`
 
 Each project entry is a `[key, path]` pair where:
 
@@ -80,7 +94,7 @@ Each project entry is a `[key, path]` pair where:
 This project uses a Rust workspace with two main packages:
 
 - **`ksm-cli`**: The main CLI application
-- **`kitty-lib`**: Reusable library for Kitty terminal integration
+- **`kitty-lib`**: Rust abstraction over Kitty terminal apis
 
 See the justfile for available development commands:
 
@@ -93,16 +107,6 @@ just fmt        # Format code
 ```
 
 See individual package READMEs for more details:
+
 - [ksm-cli/README.md](ksm-cli/README.md) - CLI development guide
 - [kitty-lib/README.md](kitty-lib/README.md) - Library architecture and API
-
-## Requirements
-
-- Kitty terminal emulator
-- Rust toolchain
-
-## Environment Variables
-
-- `KITTY_LISTEN_ON`: Kitty socket path (auto-detected if not set)
-- `KITTY_SESSION_PROJECT`: Used internally to track project sessions
-- `KSM_WORK`: When set to a truthy value (any non-empty value except "0" or "false"), automatically enables work context for all commands. The `--work` flag still takes precedence when explicitly provided.
