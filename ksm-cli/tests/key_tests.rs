@@ -1,5 +1,32 @@
 use ksm::app::App;
 use ksm::cmd::key::{cmd_key_with_projects, resolve_project_path};
+use ksm::config::Config;
+use std::fs;
+
+fn create_test_config() -> Config {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Create a unique temporary directory for each test to avoid conflicts
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_dir = std::env::temp_dir().join(format!("ksm_test_key_tests_{}", timestamp));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let config_content = r#"{
+        "dirs": [],
+        "base": [],
+        "personal": [],
+        "work": []
+    }"#;
+
+    let config_file = temp_dir.join("test_config.json");
+    fs::write(&config_file, config_content).unwrap();
+
+    Config::load_from_path(Some(config_file)).unwrap()
+}
 
 #[test]
 fn test_resolve_project_path_found() {
@@ -52,7 +79,8 @@ fn test_cmd_key_with_print_path_returns_early() {
 
     // When print_path is true, the function should return Ok(()) without calling kitty functions
     // Since we can't easily mock kitty functions, we test that it doesn't panic or error
-    let app = App::new();
+    let config = create_test_config();
+    let app = App::new(config);
     let result = cmd_key_with_projects(&app, "P1", true, &projects);
     assert!(result.is_ok());
 }
@@ -62,7 +90,8 @@ fn test_cmd_key_with_print_path_invalid_key() {
     let projects = vec![("P1".to_string(), "/test/path".to_string())];
 
     // Should return error for invalid key even with print_path=true
-    let app = App::new();
+    let config = create_test_config();
+    let app = App::new(config);
     let result = cmd_key_with_projects(&app, "P99", true, &projects);
     assert!(result.is_err());
     assert!(

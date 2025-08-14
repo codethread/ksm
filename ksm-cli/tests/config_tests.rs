@@ -1,90 +1,78 @@
+use assert_fs::TempDir;
+use assert_fs::prelude::*;
 use ksm::config::{Config, get_all_directories_from_path};
-use std::fs;
 use std::path::PathBuf;
 
 #[test]
 fn test_config_keyed_projects_personal() {
-    // Create a test config file
-    let temp_dir = std::env::temp_dir().join("ksm_test_config_personal");
-    let _ = fs::remove_dir_all(&temp_dir);
-    fs::create_dir_all(&temp_dir).unwrap();
+    let temp = TempDir::new().unwrap();
 
-    let config_content = r#"{
-        "dirs": [],
-        "base": [["P0", "~/base"]],
-        "personal": [["P1", "~/personal"]],
-        "work": [["P2", "~/work"]]
-    }"#;
+    temp.child("test_config.json")
+        .write_str(
+            r#"{
+            "dirs": [],
+            "base": [["P0", "~/base"]],
+            "personal": [["P1", "~/personal"]],
+            "work": [["P2", "~/work"]]
+        }"#,
+        )
+        .unwrap();
 
-    let config_file = temp_dir.join("test_config.json");
-    fs::write(&config_file, config_content).unwrap();
-
-    let config = Config::load_from_path(Some(config_file)).unwrap();
+    let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
     let projects = config.keyed_projects(false);
 
     assert_eq!(projects.len(), 2);
     assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
     assert!(projects.contains(&("P1".to_string(), "~/personal".to_string())));
     assert!(!projects.contains(&("P2".to_string(), "~/work".to_string())));
-
-    // Clean up
-    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_config_keyed_projects_work() {
-    // Create a test config file
-    let temp_dir = std::env::temp_dir().join("ksm_test_config_work");
-    let _ = fs::remove_dir_all(&temp_dir);
-    fs::create_dir_all(&temp_dir).unwrap();
+    let temp = TempDir::new().unwrap();
 
-    let config_content = r#"{
-        "dirs": [],
-        "base": [["P0", "~/base"]],
-        "personal": [["P1", "~/personal"]],
-        "work": [["P2", "~/work"]]
-    }"#;
+    temp.child("test_config.json")
+        .write_str(
+            r#"{
+            "dirs": [],
+            "base": [["P0", "~/base"]],
+            "personal": [["P1", "~/personal"]],
+            "work": [["P2", "~/work"]]
+        }"#,
+        )
+        .unwrap();
 
-    let config_file = temp_dir.join("test_config.json");
-    fs::write(&config_file, config_content).unwrap();
-
-    let config = Config::load_from_path(Some(config_file)).unwrap();
+    let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
     let projects = config.keyed_projects(true);
 
     assert_eq!(projects.len(), 2);
     assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
     assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
     assert!(!projects.contains(&("P1".to_string(), "~/personal".to_string())));
-
-    // Clean up
-    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_config_expanded_directories() {
-    // Create a temporary directory structure for testing
-    let temp_dir = std::env::temp_dir().join("ksm_test_config_expanded");
-    let _ = fs::remove_dir_all(&temp_dir);
-    fs::create_dir_all(&temp_dir).unwrap();
+    let temp = TempDir::new().unwrap();
 
     // Create test directories
-    fs::create_dir_all(temp_dir.join("project1")).unwrap();
-    fs::create_dir_all(temp_dir.join("project2")).unwrap();
+    temp.child("project1").create_dir_all().unwrap();
+    temp.child("project2/subdir").create_dir_all().unwrap();
+    temp.child("non-project").create_dir_all().unwrap();
 
-    let config_content = format!(
-        r#"{{
-            "dirs": ["{}/project*"],
-            "base": [],
-            "personal": [],
-            "work": []
-        }}"#,
-        temp_dir.display()
-    );
+    temp.child("test_config.json")
+        .write_str(&format!(
+            r#"{{
+                "dirs": ["{}/project*"],
+                "base": [],
+                "personal": [],
+                "work": []
+            }}"#,
+            temp.path().display()
+        ))
+        .unwrap();
 
-    let config_file = temp_dir.join("test_config.json");
-    fs::write(&config_file, config_content).unwrap();
-
-    let config = Config::load_from_path(Some(config_file)).unwrap();
+    let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
     let directories = config.expanded_directories().unwrap();
 
     assert_eq!(directories.len(), 2);
@@ -101,33 +89,25 @@ fn test_config_expanded_directories() {
 
     assert!(dir_names.contains(&"project1".to_string()));
     assert!(dir_names.contains(&"project2".to_string()));
-
-    // Clean up
-    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_dirs_mixed_glob_and_regular_patterns() {
-    // Create a temporary directory structure for testing
-    let temp_dir = std::env::temp_dir().join("ksm_test_mixed");
-    let _ = fs::remove_dir_all(&temp_dir); // Clean up if exists
-    fs::create_dir_all(&temp_dir).unwrap();
+    let temp = TempDir::new().unwrap();
 
-    // Create test directories for glob patterns
-    let test_dirs = ["glob_project1", "glob_project2", "subdir"];
-    for dir in &test_dirs {
-        fs::create_dir_all(temp_dir.join(dir)).unwrap();
+    // Create directory structure more readably
+    for dir in &[
+        "glob_project1",
+        "glob_project2",
+        "regular_project1",
+        "regular_project2",
+    ] {
+        temp.child(dir).create_dir_all().unwrap();
     }
 
-    let subdir_path = temp_dir.join("subdir");
-    fs::create_dir_all(subdir_path.join("nested1")).unwrap();
-    fs::create_dir_all(subdir_path.join("nested2")).unwrap();
+    temp.child("subdir/nested1").create_dir_all().unwrap();
+    temp.child("subdir/nested2").create_dir_all().unwrap();
 
-    // Create test directories for regular paths
-    fs::create_dir_all(temp_dir.join("regular_project1")).unwrap();
-    fs::create_dir_all(temp_dir.join("regular_project2")).unwrap();
-
-    // Create a test config file with mixed glob and regular paths
     let config_content = format!(
         r#"{{
             "dirs": [
@@ -140,43 +120,79 @@ fn test_dirs_mixed_glob_and_regular_patterns() {
             "personal": [],
             "work": []
         }}"#,
-        temp_dir.display(),
-        temp_dir.display(),
-        temp_dir.display(),
-        temp_dir.display()
+        temp.path().display(),
+        temp.path().display(),
+        temp.path().display(),
+        temp.path().display()
     );
 
-    let config_file = temp_dir.join("test_config.json");
-    fs::write(&config_file, config_content).unwrap();
+    temp.child("test_config.json")
+        .write_str(&config_content)
+        .unwrap();
 
-    // Test mixed pattern expansion
-    let result = get_all_directories_from_path(Some(config_file)).unwrap();
+    let result = get_all_directories_from_path(Some(temp.path().join("test_config.json"))).unwrap();
 
-    // Should find: glob_project1, glob_project2, regular_project1, regular_project2, nested1, nested2
+    // Should find: glob_project1, glob_project2, regular_project1 (literal), regular_project2 (literal), nested1, nested2
     assert_eq!(result.len(), 6);
 
-    // Convert to strings for easier comparison
-    let result_strings: Vec<String> = result
+    // Check that regular paths are returned as literal paths (full paths)
+    let regular_project1_path = format!("{}/regular_project1", temp.path().display());
+    let regular_project2_path = format!("{}/regular_project2", temp.path().display());
+    assert!(result.contains(&regular_project1_path));
+    assert!(result.contains(&regular_project2_path));
+
+    // Check that glob patterns still expand to actual directories
+    let glob_matches: Vec<&String> = result
         .iter()
-        .map(|p| {
-            PathBuf::from(p)
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string()
-        })
+        .filter(|p| p.contains("glob_project"))
         .collect();
+    assert_eq!(glob_matches.len(), 2);
 
-    // Check glob patterns matched
-    assert!(result_strings.contains(&"glob_project1".to_string()));
-    assert!(result_strings.contains(&"glob_project2".to_string()));
-    assert!(result_strings.contains(&"nested1".to_string()));
-    assert!(result_strings.contains(&"nested2".to_string()));
+    let nested_matches: Vec<&String> = result.iter().filter(|p| p.contains("nested")).collect();
+    assert_eq!(nested_matches.len(), 2);
+}
 
-    // Check regular paths matched
-    assert!(result_strings.contains(&"regular_project1".to_string()));
-    assert!(result_strings.contains(&"regular_project2".to_string()));
+#[test]
+fn test_literal_paths_behavior() {
+    let temp = TempDir::new().unwrap();
 
-    // Clean up
-    let _ = fs::remove_dir_all(&temp_dir);
+    // Create one existing directory
+    temp.child("existing_dir").create_dir_all().unwrap();
+
+    let config_content = format!(
+        r#"{{
+            "dirs": [
+                "{}/existing_dir",
+                "{}/nonexistent_dir",
+                "~/dev"
+            ],
+            "base": [],
+            "personal": [],
+            "work": []
+        }}"#,
+        temp.path().display(),
+        temp.path().display()
+    );
+
+    temp.child("test_config.json")
+        .write_str(&config_content)
+        .unwrap();
+
+    let result = get_all_directories_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+
+    // Should contain all 3 paths as literals, regardless of existence
+    assert_eq!(result.len(), 3);
+
+    let existing_path = format!("{}/existing_dir", temp.path().display());
+    let nonexistent_path = format!("{}/nonexistent_dir", temp.path().display());
+
+    assert!(result.contains(&existing_path));
+    assert!(result.contains(&nonexistent_path));
+
+    // Should expand tilde
+    let home_expanded = result.iter().find(|p| p.contains("/dev")).unwrap();
+    assert!(
+        home_expanded.starts_with('/')
+            || home_expanded.starts_with(std::env::var("HOME").unwrap_or_default().as_str())
+    );
 }

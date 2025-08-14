@@ -2,8 +2,12 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "ksm")]
-#[command(about = "Kitty Session Manager - Rust implementation")]
+#[command(about = "Kitty Session Manager")]
 pub struct Cli {
+    /// Path to config file
+    #[arg(short, long)]
+    pub config: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

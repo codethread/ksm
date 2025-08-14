@@ -3,12 +3,11 @@ use log::{debug, error, info};
 use std::path::Path;
 
 use crate::app::App;
-use crate::config::{Config, KeyedProject};
+use crate::config::KeyedProject;
 use crate::utils::expand_tilde;
 
 pub fn cmd_key(app: &App, key: &str, is_work: bool, print_path: bool) -> Result<()> {
-    let config = Config::load()?;
-    let keyed_projects = config.keyed_projects(is_work);
+    let keyed_projects = app.config.keyed_projects(is_work);
     cmd_key_with_projects(app, key, print_path, &keyed_projects)
 }
 

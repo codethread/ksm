@@ -84,20 +84,20 @@ ci: fmt-check lint test
 
 # Run CLI with help
 [group('ksm cmds')]
-help:
+run-help:
     cargo run --package ksm -- --help
 
 # Run CLI list command
 [group('ksm cmds')]
-list:
-    cargo run --package ksm -- list
+run-list +ARGS:
+    cargo run --package ksm -- list {{ARGS}}
 
 # Run CLI select command
 [group('ksm cmds')]
-select:
+run-select:
     cargo run --package ksm -- select
 
 # Run CLI with specific key (usage: just key <key_name>)
 [group('ksm cmds')]
-key KEY:
+run-key KEY:
     cargo run --package ksm -- key {{KEY}}

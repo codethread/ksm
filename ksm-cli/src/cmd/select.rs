@@ -5,15 +5,13 @@ use std::fs;
 use std::io::Cursor;
 
 use crate::app::App;
-use crate::config::Config;
 use crate::utils::{expand_tilde, format_project_for_selection, parse_project_selection};
 
 pub fn cmd_select(app: &App, _is_work: bool) -> Result<()> {
     info!("Starting interactive project selection");
 
-    let config = Config::load()?;
-    let directories = config.expanded_directories()?;
-    let projects = get_projects(directories)?;
+    let directories = app.config.expanded_directories()?;
+    let projects = get_projects_from_directories(directories)?;
 
     if projects.is_empty() {
         println!("No projects found");
@@ -103,46 +101,27 @@ pub fn cmd_select(app: &App, _is_work: bool) -> Result<()> {
     Ok(())
 }
 
-fn get_projects(directories: Vec<String>) -> Result<Vec<(String, String)>> {
+fn get_projects_from_directories(directories: Vec<String>) -> Result<Vec<(String, String)>> {
     let mut all_projects = Vec::new();
 
     for dir in directories {
         let expanded_dir = expand_tilde(&dir);
-        debug!("Scanning directory: {}", expanded_dir);
+        debug!("Using directory as project: {}", expanded_dir);
 
-        match fs::read_dir(&expanded_dir) {
-            Ok(entries) => {
-                for entry in entries {
-                    match entry {
-                        Ok(entry) => {
-                            let path = entry.path();
-
-                            // Only include directories (equivalent to --type=d)
-                            if path.is_dir() {
-                                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                    all_projects.push((
-                                        name.to_string(),
-                                        path.to_string_lossy().to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Error reading entry in directory {}: {}", expanded_dir, e);
-                        }
-                    }
+        if let Ok(path) = fs::canonicalize(&expanded_dir) {
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    all_projects.push((name.to_string(), path.to_string_lossy().to_string()));
                 }
+            } else {
+                warn!("Directory does not exist: {}", expanded_dir);
             }
-            Err(e) => {
-                warn!("Error scanning directory {}: {}", expanded_dir, e);
-            }
+        } else {
+            warn!("Cannot resolve directory path: {}", expanded_dir);
         }
     }
 
     all_projects.sort_by(|a, b| a.0.cmp(&b.0));
-    info!(
-        "Found {} projects across all directories",
-        all_projects.len()
-    );
+    info!("Found {} projects from directories", all_projects.len());
     Ok(all_projects)
 }

@@ -1,14 +1,14 @@
 use anyhow::Result;
-use log::{debug, info};
-use std::env;
+use log::{debug, info, warn};
 use std::fs;
 
 use crate::app::App;
+use crate::utils::expand_tilde;
 
 pub fn cmd_list(app: &App) -> Result<()> {
     info!("Listing all available sessions");
 
-    let projects = get_projects()?;
+    let projects = get_projects(app)?;
 
     println!("Available sessions:");
     for project in projects {
@@ -33,28 +33,30 @@ pub fn cmd_list(app: &App) -> Result<()> {
     Ok(())
 }
 
-fn get_projects() -> Result<Vec<String>> {
-    let home = env::var("HOME").unwrap_or_default();
-    let projects_dir = format!("{}/dev/projects", home);
+fn get_projects(app: &App) -> Result<Vec<String>> {
+    let directories = app.config.expanded_directories()?;
+    let mut all_projects = Vec::new();
 
-    debug!("Scanning for projects in directory: {}", projects_dir);
+    for dir in directories {
+        let expanded_dir = expand_tilde(&dir);
+        debug!("Using directory as project: {}", expanded_dir);
 
-    let entries = fs::read_dir(&projects_dir)?;
-    let mut projects = Vec::new();
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-
-        // Only include directories (equivalent to --type=d)
-        if path.is_dir() {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                projects.push(name.to_string());
+        if let Ok(path) = fs::canonicalize(&expanded_dir) {
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    all_projects.push(name.to_string());
+                }
+            } else {
+                warn!("Directory does not exist: {}", expanded_dir);
             }
+        } else {
+            warn!("Cannot resolve directory path: {}", expanded_dir);
         }
     }
 
-    info!("Found {} projects in {}", projects.len(), projects_dir);
-    debug!("Projects: {:?}", projects);
-    Ok(projects)
+    all_projects.sort();
+    all_projects.dedup(); // Remove duplicates in case directories overlap
+    info!("Found {} projects from directories", all_projects.len());
+    debug!("Projects: {:?}", all_projects);
+    Ok(all_projects)
 }

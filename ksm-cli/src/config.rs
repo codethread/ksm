@@ -1,7 +1,7 @@
 use anyhow::Result;
 use glob::glob;
 use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -22,14 +22,6 @@ pub struct Config {
     base: Vec<KeyedProject>,
     personal: Vec<KeyedProject>,
     work: Vec<KeyedProject>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ExpandedConfig {
-    pub dirs: Vec<String>,
-    pub base: Vec<KeyedProject>,
-    pub personal: Vec<KeyedProject>,
-    pub work: Vec<KeyedProject>,
 }
 
 impl Config {
@@ -84,45 +76,33 @@ impl Config {
         for dir_pattern in &self.dirs {
             let expanded_path = shellexpand::tilde(dir_pattern);
 
-            // Always try to expand as glob pattern first, since glob handles regular paths too
-            match glob(&expanded_path) {
-                Ok(paths) => {
-                    let mut found_any = false;
-                    for entry in paths {
-                        match entry {
-                            Ok(path) => {
-                                if path.is_dir() {
-                                    found_any = true;
-                                    if let Some(path_str) = path.to_str() {
-                                        expanded_dirs.push(path_str.to_string());
+            // Check if the pattern contains glob characters
+            if dir_pattern.contains('*') || dir_pattern.contains('?') || dir_pattern.contains('[') {
+                // Handle as glob pattern
+                match glob(&expanded_path) {
+                    Ok(paths) => {
+                        for entry in paths {
+                            match entry {
+                                Ok(path) => {
+                                    if path.is_dir() {
+                                        if let Some(path_str) = path.to_str() {
+                                            expanded_dirs.push(path_str.to_string());
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                error!("Error reading glob path: {}", e);
+                                Err(e) => {
+                                    error!("Error reading glob path: {}", e);
+                                }
                             }
                         }
                     }
-
-                    // If no directories were found and it doesn't contain glob characters,
-                    // treat it as a literal path that might not exist yet
-                    if !found_any
-                        && !dir_pattern.contains('*')
-                        && !dir_pattern.contains('?')
-                        && !dir_pattern.contains('[')
-                    {
-                        debug!(
-                            "Directory '{}' does not exist, adding as literal path",
-                            expanded_path
-                        );
-                        expanded_dirs.push(expanded_path.to_string());
+                    Err(e) => {
+                        error!("Invalid glob pattern '{}': {}", dir_pattern, e);
                     }
                 }
-                Err(e) => {
-                    error!("Invalid glob pattern '{}': {}", dir_pattern, e);
-                    // Fallback to treating as literal path
-                    expanded_dirs.push(expanded_path.to_string());
-                }
+            } else {
+                // Handle as literal path - add it regardless of whether it exists
+                expanded_dirs.push(expanded_path.to_string());
             }
         }
 

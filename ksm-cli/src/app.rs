@@ -1,19 +1,16 @@
+use crate::config::Config;
 use crate::kitty::Kitty;
 use kitty_lib::KittyExecutor;
 
 pub struct App {
+    pub config: Config,
     pub kitty: Kitty<KittyExecutor>,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl App {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
+            config,
             kitty: Kitty::new(),
         }
     }
