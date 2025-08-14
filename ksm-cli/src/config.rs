@@ -2,6 +2,7 @@ use anyhow::Result;
 use glob::glob;
 use log::{debug, error, info};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -10,10 +11,25 @@ pub type KeyedProject = (String, String);
 
 #[derive(Debug, Deserialize)]
 struct SessionConfigData {
+    search: ConfigSearchData,
+    projects: ConfigProjectsData,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConfigSearchData {
     dirs: Vec<String>,
-    base: Vec<KeyedProject>,
-    personal: Vec<KeyedProject>,
-    work: Vec<KeyedProject>,
+    #[allow(dead_code)]
+    vsc: Vec<String>,
+    #[allow(dead_code)]
+    cmd: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConfigProjectsData {
+    #[serde(rename = "*")]
+    base: Option<HashMap<String, String>>,
+    #[serde(flatten)]
+    profiles: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +38,25 @@ pub struct Config {
     base: Vec<KeyedProject>,
     personal: Vec<KeyedProject>,
     work: Vec<KeyedProject>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigSearch {
+    pub dirs: Vec<String>,
+    pub vsc: Vec<String>,
+    pub cmd: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigProjects {
+    pub base: HashMap<String, String>,
+    pub profiles: HashMap<String, HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigNewExample {
+    pub search: ConfigSearch,
+    pub projects: ConfigProjects,
 }
 
 impl Config {
@@ -43,18 +78,44 @@ impl Config {
             e
         })?;
 
+        Self::from_config_data(data)
+    }
+
+    fn from_config_data(data: SessionConfigData) -> Result<Self> {
+        // Extract base projects from the "*" key if it exists
+        let base = if let Some(base_map) = data.projects.base {
+            base_map.into_iter().collect()
+        } else {
+            Vec::new()
+        };
+
+        // Extract personal and work projects from profiles
+        let personal: Vec<KeyedProject> = data
+            .projects
+            .profiles
+            .get("personal")
+            .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+
+        let work: Vec<KeyedProject> = data
+            .projects
+            .profiles
+            .get("work")
+            .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+
         info!(
             "Successfully loaded config with {} base, {} personal, {} work projects",
-            data.base.len(),
-            data.personal.len(),
-            data.work.len()
+            base.len(),
+            personal.len(),
+            work.len()
         );
 
         Ok(Config {
-            dirs: data.dirs,
-            base: data.base,
-            personal: data.personal,
-            work: data.work,
+            dirs: data.search.dirs,
+            base,
+            personal,
+            work,
         })
     }
 
@@ -128,27 +189,7 @@ pub fn get_keyed_projects_from_path(
     Ok(config.keyed_projects(is_work))
 }
 
-pub fn get_all_directories(_is_work: bool) -> Result<Vec<String>> {
-    get_all_directories_from_path(None)
-}
-
 pub fn get_all_directories_from_path(config_path: Option<PathBuf>) -> Result<Vec<String>> {
     let config = Config::load_from_path(config_path)?;
     config.expanded_directories()
-}
-
-// Deprecated - use Config::load() instead
-#[deprecated(note = "Use Config::load() instead")]
-pub fn load_config() -> Result<Config> {
-    Config::load()
-}
-
-#[deprecated(note = "Use Config::load_from_path() instead")]
-pub fn load_config_from_path(config_path: Option<PathBuf>) -> Result<Config> {
-    Config::load_from_path(config_path)
-}
-
-#[deprecated(note = "Use config.keyed_projects() instead")]
-pub fn get_keyed_projects_from_config(config: &Config, is_work: bool) -> Vec<KeyedProject> {
-    config.keyed_projects(is_work)
 }

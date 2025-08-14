@@ -55,3 +55,4 @@ This is a Rust workspace with two main packages:
 - CLI tests verify argument parsing and command routing
 
 - please run `just ci` and fix all issues before considering a job as complete
+- when updating apis, like config or cli params, we don't need to consider graceful migration by handling old behaviour - we can simply make breaking changes

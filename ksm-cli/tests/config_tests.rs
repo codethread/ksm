@@ -10,10 +10,22 @@ fn test_config_keyed_projects_personal() {
     temp.child("test_config.json")
         .write_str(
             r#"{
-            "dirs": [],
-            "base": [["P0", "~/base"]],
-            "personal": [["P1", "~/personal"]],
-            "work": [["P2", "~/work"]]
+            "search": {
+                "dirs": [],
+                "vsc": [],
+                "cmd": []
+            },
+            "projects": {
+                "*": {
+                    "P0": "~/base"
+                },
+                "personal": {
+                    "P1": "~/personal"
+                },
+                "work": {
+                    "P2": "~/work"
+                }
+            }
         }"#,
         )
         .unwrap();
@@ -34,10 +46,22 @@ fn test_config_keyed_projects_work() {
     temp.child("test_config.json")
         .write_str(
             r#"{
-            "dirs": [],
-            "base": [["P0", "~/base"]],
-            "personal": [["P1", "~/personal"]],
-            "work": [["P2", "~/work"]]
+            "search": {
+                "dirs": [],
+                "vsc": [],
+                "cmd": []
+            },
+            "projects": {
+                "*": {
+                    "P0": "~/base"
+                },
+                "personal": {
+                    "P1": "~/personal"
+                },
+                "work": {
+                    "P2": "~/work"
+                }
+            }
         }"#,
         )
         .unwrap();
@@ -63,10 +87,16 @@ fn test_config_expanded_directories() {
     temp.child("test_config.json")
         .write_str(&format!(
             r#"{{
-                "dirs": ["{}/project*"],
-                "base": [],
-                "personal": [],
-                "work": []
+                "search": {{
+                    "dirs": ["{}/project*"],
+                    "vsc": [],
+                    "cmd": []
+                }},
+                "projects": {{
+                    "*": {{}},
+                    "personal": {{}},
+                    "work": {{}}
+                }}
             }}"#,
             temp.path().display()
         ))
@@ -110,15 +140,21 @@ fn test_dirs_mixed_glob_and_regular_patterns() {
 
     let config_content = format!(
         r#"{{
-            "dirs": [
-                "{}/glob_*",
-                "{}/regular_project1",
-                "{}/regular_project2",
-                "{}/subdir/*"
-            ],
-            "base": [],
-            "personal": [],
-            "work": []
+            "search": {{
+                "dirs": [
+                    "{}/glob_*",
+                    "{}/regular_project1",
+                    "{}/regular_project2",
+                    "{}/subdir/*"
+                ],
+                "vsc": [],
+                "cmd": []
+            }},
+            "projects": {{
+                "*": {{}},
+                "personal": {{}},
+                "work": {{}}
+            }}
         }}"#,
         temp.path().display(),
         temp.path().display(),
@@ -161,14 +197,20 @@ fn test_literal_paths_behavior() {
 
     let config_content = format!(
         r#"{{
-            "dirs": [
-                "{}/existing_dir",
-                "{}/nonexistent_dir",
-                "~/dev"
-            ],
-            "base": [],
-            "personal": [],
-            "work": []
+            "search": {{
+                "dirs": [
+                    "{}/existing_dir",
+                    "{}/nonexistent_dir",
+                    "~/dev"
+                ],
+                "vsc": [],
+                "cmd": []
+            }},
+            "projects": {{
+                "*": {{}},
+                "personal": {{}},
+                "work": {{}}
+            }}
         }}"#,
         temp.path().display(),
         temp.path().display()

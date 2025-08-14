@@ -16,10 +16,16 @@ fn create_test_config() -> Config {
     fs::create_dir_all(&temp_dir).unwrap();
 
     let config_content = r#"{
-        "dirs": [],
-        "base": [],
-        "personal": [],
-        "work": []
+        "search": {
+            "dirs": [],
+            "vsc": [],
+            "cmd": []
+        },
+        "projects": {
+            "*": {},
+            "personal": {},
+            "work": {}
+        }
     }"#;
 
     let config_file = temp_dir.join("test_config.json");
