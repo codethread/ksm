@@ -86,12 +86,12 @@ ci: fmt-check lint test
 [group('project-wide')]
 [group('validate')]
 coverage:
-    cargo tarpaulin --workspace
+    cargo tarpaulin --workspace --target-dir target/tarpaulin-build
 
 # Run code coverage with HTML output
 [group('project-wide')]
 coverage-html:
-    cargo tarpaulin --workspace --out Html --output-dir target/tarpaulin
+    cargo tarpaulin --workspace --target-dir target/tarpaulin-build --out Html --output-dir target/tarpaulin
 
 # Run code coverage and open HTML report
 [group('project-wide')]

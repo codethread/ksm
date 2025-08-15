@@ -9,6 +9,7 @@ use ksm::cli::{Cli, Commands};
 use ksm::cmd::{cmd_key, cmd_list, cmd_select};
 use ksm::config::Config;
 
+#[cfg(not(tarpaulin_include))]
 fn main() -> Result<()> {
     // Initialize logger
     env_logger::init();
