@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Use `cargo check --workspace` for quick validation (preferred over `cargo build`)
 - Run all tests: `cargo test --workspace`
 - Linting: `just lint` or `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- Code coverage: `just coverage` (generates console output), `just coverage-html` (generates HTML report), `just coverage-open` (opens HTML report in browser)
 - Comprehensive CI checks: `just ci` (runs format check, lint, and test)
 - **IMPORTANT:** please run `just ci` and fix all issues before considering a job as complete
 

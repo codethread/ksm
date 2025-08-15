@@ -1,0 +1,34 @@
+[tool.tarpaulin.workspace]
+# Run coverage on all workspace members
+workspace = true
+
+# Output formats
+out = ["Html", "Lcov", "Stdout"]
+
+# Coverage thresholds
+fail-under = 70
+
+# Exclude certain patterns from coverage
+exclude = [
+    "*/tests/*",
+    "*/target/*"
+]
+
+# Include all packages in workspace
+packages = ["ksm", "kitty-lib"]
+
+# Run all tests including ignored ones
+run-ignored = false
+
+# Generate coverage for all features
+all-features = true
+
+# Timeout for tests (in seconds)
+timeout = 120
+
+# Engine to use for coverage
+engine = "llvm"
+
+[tool.tarpaulin.html]
+# HTML output configuration
+output-dir = "target/tarpaulin"

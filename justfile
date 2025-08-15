@@ -80,6 +80,24 @@ fmt-check:
 [group('validate')]
 ci: fmt-check lint test
 
+# === COVERAGE ===
+
+# Run code coverage analysis using tarpaulin
+[group('project-wide')]
+[group('validate')]
+coverage:
+    cargo tarpaulin --workspace
+
+# Run code coverage with HTML output
+[group('project-wide')]
+coverage-html:
+    cargo tarpaulin --workspace --out Html --output-dir target/tarpaulin
+
+# Run code coverage and open HTML report
+[group('project-wide')]
+coverage-open: coverage-html
+    open target/tarpaulin/tarpaulin-report.html
+
 # === CLI USAGE ===
 
 # Run CLI with help
