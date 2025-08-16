@@ -20,8 +20,8 @@ struct ConfigSearchData {
     dirs: Vec<String>,
     #[allow(dead_code)]
     vsc: Vec<String>,
-    #[allow(dead_code)]
-    cmd: Vec<serde_json::Value>,
+    // #[allow(dead_code)]
+    // cmd: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +35,7 @@ struct ConfigProjectsData {
 #[derive(Debug, Clone)]
 pub struct Config {
     dirs: Vec<String>,
+    vsc_dirs: Vec<String>,
     base: Vec<KeyedProject>,
     personal: Vec<KeyedProject>,
     work: Vec<KeyedProject>,
@@ -53,6 +54,8 @@ impl Config {
             error!("Failed to read config file {:?}: {}", config_path, e);
             e
         })?;
+
+        debug!("Loaded config {:?}", content);
 
         let data: SessionConfigData = serde_json::from_str(&content).map_err(|e| {
             error!("Failed to parse config JSON: {}", e);
@@ -94,6 +97,7 @@ impl Config {
 
         Ok(Config {
             dirs: data.search.dirs,
+            vsc_dirs: data.search.vsc,
             base,
             personal,
             work,
@@ -148,7 +152,64 @@ impl Config {
             }
         }
 
+        // Add discovered git projects
+        if let Ok(git_projects) = self.discover_git_projects() {
+            expanded_dirs.extend(git_projects);
+        }
+
         Ok(expanded_dirs)
+    }
+
+    fn discover_git_projects(&self) -> Result<Vec<String>> {
+        let mut git_projects = Vec::new();
+
+        for vsc_dir_pattern in &self.vsc_dirs {
+            let expanded_path = shellexpand::tilde(vsc_dir_pattern);
+            let vsc_path = PathBuf::from(expanded_path.as_ref());
+
+            if vsc_path.exists() && vsc_path.is_dir() {
+                self.find_git_projects_recursive(&vsc_path, &mut git_projects)?;
+            }
+        }
+
+        Ok(git_projects)
+    }
+
+    fn find_git_projects_recursive(
+        &self,
+        dir: &PathBuf,
+        git_projects: &mut Vec<String>,
+    ) -> Result<()> {
+        Self::find_git_projects_recursive_helper(dir, git_projects)
+    }
+
+    fn find_git_projects_recursive_helper(
+        dir: &PathBuf,
+        git_projects: &mut Vec<String>,
+    ) -> Result<()> {
+        let git_dir = dir.join(".git");
+
+        if git_dir.exists() {
+            if let Some(dir_str) = dir.to_str() {
+                git_projects.push(dir_str.to_string());
+            }
+            return Ok(());
+        }
+
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(dir_name) = path.file_name() {
+                        if !dir_name.to_string_lossy().starts_with('.') {
+                            Self::find_git_projects_recursive_helper(&path, git_projects)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -406,5 +467,163 @@ mod tests {
             home_expanded.starts_with('/')
                 || home_expanded.starts_with(std::env::var("HOME").unwrap_or_default().as_str())
         );
+    }
+
+    #[test]
+    fn test_discover_git_projects() {
+        let temp = TempDir::new().unwrap();
+
+        // Create directory structure with git repos
+        temp.child("dev/project1/.git").create_dir_all().unwrap();
+        temp.child("dev/project2/.git/exclude")
+            .create_dir_all()
+            .unwrap();
+        temp.child("dev/project3/.git").create_dir_all().unwrap();
+        temp.child("dev/project3/submodule/.git")
+            .create_dir_all()
+            .unwrap();
+        temp.child("dev/non-git-project/src")
+            .create_dir_all()
+            .unwrap();
+        temp.child("work/repo1/.git").create_dir_all().unwrap();
+
+        let config_content = format!(
+            r#"{{
+            "search": {{
+                "dirs": [],
+                "vsc": ["{}/dev", "{}/work"]
+            }},
+            "projects": {{
+                "*": {{}},
+                "personal": {{}},
+                "work": {{}}
+            }}
+        }}"#,
+            temp.path().display(),
+            temp.path().display()
+        );
+
+        temp.child("test_config.json")
+            .write_str(&config_content)
+            .unwrap();
+
+        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let git_projects = config.discover_git_projects().unwrap();
+
+        assert_eq!(git_projects.len(), 4);
+
+        let project_names: Vec<String> = git_projects
+            .iter()
+            .map(|p| {
+                PathBuf::from(p)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+
+        assert!(project_names.contains(&"project1".to_string()));
+        assert!(project_names.contains(&"project2".to_string()));
+        assert!(project_names.contains(&"project3".to_string()));
+        assert!(project_names.contains(&"repo1".to_string()));
+        assert!(!project_names.contains(&"submodule".to_string()));
+        assert!(!project_names.contains(&"non-git-project".to_string()));
+    }
+
+    #[test]
+    fn test_discover_git_projects_stops_at_git_boundary() {
+        let temp = TempDir::new().unwrap();
+
+        // Create nested git repos to test boundary stopping
+        temp.child("parent/.git").create_dir_all().unwrap();
+        temp.child("parent/child/.git").create_dir_all().unwrap();
+        temp.child("parent/regular-dir/nested/.git")
+            .create_dir_all()
+            .unwrap();
+
+        let config_content = format!(
+            r#"{{
+            "search": {{
+                "dirs": [],
+                "vsc": ["{}"]
+            }},
+            "projects": {{
+                "*": {{}},
+                "personal": {{}},
+                "work": {{}}
+            }}
+        }}"#,
+            temp.path().display()
+        );
+
+        temp.child("test_config.json")
+            .write_str(&config_content)
+            .unwrap();
+
+        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let git_projects = config.discover_git_projects().unwrap();
+
+        assert_eq!(git_projects.len(), 1);
+
+        let project_path = &git_projects[0];
+        assert!(project_path.ends_with("parent"));
+        assert!(!git_projects.iter().any(|p| p.contains("child")));
+        assert!(!git_projects.iter().any(|p| p.contains("nested")));
+    }
+
+    #[test]
+    fn test_expanded_directories_includes_git_projects() {
+        let temp = TempDir::new().unwrap();
+
+        // Create both regular dirs and git projects
+        temp.child("regular_dir1").create_dir_all().unwrap();
+        temp.child("regular_dir2").create_dir_all().unwrap();
+        temp.child("git_projects/project1/.git")
+            .create_dir_all()
+            .unwrap();
+        temp.child("git_projects/project2/.git")
+            .create_dir_all()
+            .unwrap();
+
+        let config_content = format!(
+            r#"{{
+            "search": {{
+                "dirs": ["{}/regular_dir1", "{}/regular_dir2"],
+                "vsc": ["{}/git_projects"]
+            }},
+            "projects": {{
+                "*": {{}},
+                "personal": {{}},
+                "work": {{}}
+            }}
+        }}"#,
+            temp.path().display(),
+            temp.path().display(),
+            temp.path().display()
+        );
+
+        temp.child("test_config.json")
+            .write_str(&config_content)
+            .unwrap();
+
+        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let all_dirs = config.expanded_directories().unwrap();
+
+        // Should include both regular dirs and discovered git projects
+        assert_eq!(all_dirs.len(), 4);
+
+        // Check regular dirs are included
+        let regular_dir1_path = format!("{}/regular_dir1", temp.path().display());
+        let regular_dir2_path = format!("{}/regular_dir2", temp.path().display());
+        assert!(all_dirs.contains(&regular_dir1_path));
+        assert!(all_dirs.contains(&regular_dir2_path));
+
+        // Check git projects are included
+        let git_project_paths: Vec<&String> = all_dirs
+            .iter()
+            .filter(|p| p.contains("git_projects") && p.contains("project"))
+            .collect();
+        assert_eq!(git_project_paths.len(), 2);
     }
 }
