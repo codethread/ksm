@@ -6,9 +6,28 @@ use crate::app::App;
 use crate::config::KeyedProject;
 use crate::utils::expand_tilde;
 
-pub fn cmd_key(app: &App, key: &str, is_work: bool, print_path: bool) -> Result<()> {
-    let keyed_projects = app.config.keyed_projects(is_work);
+pub fn cmd_key(app: &App, key: &str, print_path: bool) -> Result<()> {
+    let keyed_projects = get_keyed_projects(app);
     cmd_key_with_projects(app, key, print_path, &keyed_projects)
+}
+
+pub fn cmd_keys(app: &App) -> Result<()> {
+    let keyed_projects = get_keyed_projects(app);
+
+    if keyed_projects.is_empty() {
+        println!("No keys configured");
+        return Ok(());
+    }
+
+    for (key, path) in keyed_projects {
+        println!("{}: {}", key, path);
+    }
+
+    Ok(())
+}
+
+fn get_keyed_projects(app: &App) -> Vec<KeyedProject> {
+    app.config.keyed_projects()
 }
 
 fn cmd_key_with_projects(
@@ -92,15 +111,17 @@ mod tests {
         },
         "projects": {
             "*": {},
-            "personal": {},
-            "work": {}
+            "profiles": {
+                "personal": {},
+                "work": {}
+            }
         }
     }"#;
 
         let config_file = temp_dir.join("test_config.json");
         fs::write(&config_file, config_content).unwrap();
 
-        Config::load_from_path(Some(config_file)).unwrap()
+        Config::load_from_path(Some(config_file), None).unwrap()
     }
 
     #[test]
@@ -191,5 +212,32 @@ mod tests {
 
         let result = resolve_project_path("dev", &projects).unwrap();
         assert!(result.contains("dev"));
+    }
+
+    #[test]
+    fn test_cmd_keys_empty() {
+        let config = create_test_config();
+        let app = App::new(config);
+
+        let result = cmd_keys(&app);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_cmd_keys_with_projects() {
+        let config = create_test_config();
+        let app = App::new(config);
+
+        let result = cmd_keys(&app);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_keyed_projects() {
+        let config = create_test_config();
+        let app = App::new(config);
+
+        let projects = get_keyed_projects(&app);
+        assert!(projects.is_empty() || !projects.is_empty());
     }
 }

@@ -7,7 +7,7 @@ use std::io::Cursor;
 use crate::app::App;
 use crate::utils::{expand_tilde, format_project_for_selection, parse_project_selection};
 
-pub fn cmd_select(app: &App, _is_work: bool) -> Result<()> {
+pub fn cmd_select(app: &App) -> Result<()> {
     info!("Starting interactive project selection");
 
     let directories = app.config.expanded_directories()?;

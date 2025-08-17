@@ -18,7 +18,6 @@ struct SessionConfigData {
 #[derive(Debug, Deserialize)]
 struct ConfigSearchData {
     dirs: Vec<String>,
-    #[allow(dead_code)]
     vsc: Vec<String>,
     // #[allow(dead_code)]
     // cmd: Vec<serde_json::Value>,
@@ -26,9 +25,7 @@ struct ConfigSearchData {
 
 #[derive(Debug, Deserialize)]
 struct ConfigProjectsData {
-    #[serde(rename = "*")]
-    base: Option<HashMap<String, String>>,
-    #[serde(flatten)]
+    default: Option<HashMap<String, String>>,
     profiles: HashMap<String, HashMap<String, String>>,
 }
 
@@ -37,16 +34,25 @@ pub struct Config {
     dirs: Vec<String>,
     vsc_dirs: Vec<String>,
     base: Vec<KeyedProject>,
-    personal: Vec<KeyedProject>,
-    work: Vec<KeyedProject>,
+    /// profiles chosen for use, either implicitly or explicitly via args
+    profiles: Vec<String>,
+    /// all available profiles from the config file
+    available_profiles: HashMap<String, Vec<KeyedProject>>,
 }
 
 impl Config {
     pub fn load() -> Result<Self> {
-        Self::load_from_path(None)
+        Self::load_from_path(None, None)
     }
 
-    pub fn load_from_path(config_path: Option<PathBuf>) -> Result<Self> {
+    pub fn load_with_profiles(profiles: Option<Vec<String>>) -> Result<Self> {
+        Self::load_from_path(None, profiles)
+    }
+
+    pub fn load_from_path(
+        config_path: Option<PathBuf>,
+        profiles: Option<Vec<String>>,
+    ) -> Result<Self> {
         let config_path = config_path.unwrap_or_else(get_config_path);
         debug!("Loading config from: {:?}", config_path);
 
@@ -62,58 +68,67 @@ impl Config {
             e
         })?;
 
-        Self::from_config_data(data)
+        Self::from_config_data(data, profiles)
     }
 
-    fn from_config_data(data: SessionConfigData) -> Result<Self> {
-        // Extract base projects from the "*" key if it exists
-        let base = if let Some(base_map) = data.projects.base {
-            base_map.into_iter().collect()
+    fn from_config_data(data: SessionConfigData, profiles: Option<Vec<String>>) -> Result<Self> {
+        // Extract base projects from the "default" key if it exists
+        let default = if let Some(default_map) = data.projects.default {
+            default_map.into_iter().collect()
         } else {
             Vec::new()
         };
 
-        // Extract personal and work projects from profiles
-        let personal: Vec<KeyedProject> = data
+        // Convert profiles HashMap<String, HashMap<String, String>> to HashMap<String, Vec<KeyedProject>>
+        let available_profiles: HashMap<String, Vec<KeyedProject>> = data
             .projects
             .profiles
-            .get("personal")
-            .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default();
+            .into_iter()
+            .map(|(profile_name, profile_map)| {
+                let keyed_projects: Vec<KeyedProject> = profile_map.into_iter().collect();
+                (profile_name, keyed_projects)
+            })
+            .collect();
 
-        let work: Vec<KeyedProject> = data
-            .projects
-            .profiles
-            .get("work")
-            .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default();
+        let profile_count: usize = available_profiles.values().map(|v| v.len()).sum();
 
         info!(
-            "Successfully loaded config with {} base, {} personal, {} work projects",
-            base.len(),
-            personal.len(),
-            work.len()
+            "Successfully loaded config with {} base projects and {} profile projects across {} profiles",
+            default.len(),
+            profile_count,
+            available_profiles.len()
         );
 
+        // Use only the profiles provided by the user, or empty list if none provided
+        let selected_profiles = profiles.unwrap_or_default();
+
         Ok(Config {
+            profiles: selected_profiles,
             dirs: data.search.dirs,
             vsc_dirs: data.search.vsc,
-            base,
-            personal,
-            work,
+            base: default,
+            available_profiles,
         })
     }
 
-    pub fn keyed_projects(&self, is_work: bool) -> Vec<KeyedProject> {
-        let mut result = self.base.clone();
+    pub fn keyed_projects(&self) -> Vec<KeyedProject> {
+        // Start with base projects as a HashMap to handle key overrides
+        let mut project_map: HashMap<String, String> = self.base.iter().cloned().collect();
 
-        if is_work {
-            result.extend(self.work.clone());
-        } else {
-            result.extend(self.personal.clone());
+        // Merge selected profiles in alphabetical order, with later profiles overriding earlier ones
+        let mut selected_profile_names = self.profiles.clone();
+        selected_profile_names.sort();
+
+        for profile_name in selected_profile_names {
+            if let Some(profile_projects) = self.available_profiles.get(&profile_name) {
+                for (key, value) in profile_projects {
+                    project_map.insert(key.clone(), value.clone());
+                }
+            }
         }
 
-        result
+        // Convert back to Vec<KeyedProject>
+        project_map.into_iter().collect()
     }
 
     pub fn expanded_directories(&self) -> Result<Vec<String>> {
@@ -220,7 +235,7 @@ fn get_config_path() -> PathBuf {
 
 #[cfg(test)]
 fn get_all_directories_from_path(config_path: Option<PathBuf>) -> Result<Vec<String>> {
-    let config = Config::load_from_path(config_path)?;
+    let config = Config::load_from_path(config_path, None)?;
     config.expanded_directories()
 }
 
@@ -232,7 +247,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn test_config_keyed_projects_personal() {
+    fn test_config_keyed_projects_no_profiles_only_base() {
         let temp = TempDir::new().unwrap();
 
         temp.child("test_config.json")
@@ -244,31 +259,35 @@ mod tests {
                 "cmd": []
             },
             "projects": {
-                "*": {
+                "default": {
                     "P0": "~/base"
                 },
-                "personal": {
-                    "P1": "~/personal"
-                },
-                "work": {
-                    "P2": "~/work"
+                "profiles": {
+                    "personal": {
+                        "P1": "~/personal"
+                    },
+                    "work": {
+                        "P2": "~/work"
+                    }
                 }
             }
         }"#,
             )
             .unwrap();
 
-        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
-        let projects = config.keyed_projects(false);
+        let config =
+            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        let projects = config.keyed_projects();
 
-        assert_eq!(projects.len(), 2);
+        // When no profiles are specified, only base projects should be used
+        assert_eq!(projects.len(), 1);
         assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
-        assert!(projects.contains(&("P1".to_string(), "~/personal".to_string())));
+        assert!(!projects.contains(&("P1".to_string(), "~/personal".to_string())));
         assert!(!projects.contains(&("P2".to_string(), "~/work".to_string())));
     }
 
     #[test]
-    fn test_config_keyed_projects_work() {
+    fn test_config_keyed_projects_selected_profiles_only() {
         let temp = TempDir::new().unwrap();
 
         temp.child("test_config.json")
@@ -280,27 +299,128 @@ mod tests {
                 "cmd": []
             },
             "projects": {
-                "*": {
+                "default": {
                     "P0": "~/base"
                 },
-                "personal": {
-                    "P1": "~/personal"
-                },
-                "work": {
-                    "P2": "~/work"
+                "profiles": {
+                    "personal": {
+                        "P1": "~/personal"
+                    },
+                    "work": {
+                        "P2": "~/work",
+                        "P3": "~/work_specific"
+                    },
+                    "dev": {
+                        "P4": "~/dev"
+                    }
                 }
             }
         }"#,
             )
             .unwrap();
 
-        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
-        let projects = config.keyed_projects(true);
+        // Test selecting only "work" profile
+        let config = Config::load_from_path(
+            Some(temp.path().join("test_config.json")),
+            Some(vec!["work".to_string()]),
+        )
+        .unwrap();
+        let projects = config.keyed_projects();
 
-        assert_eq!(projects.len(), 2);
+        // Should have 3 projects: P0 (base), P2 (work), P3 (work_specific)
+        assert_eq!(projects.len(), 3);
         assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
         assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
+        assert!(projects.contains(&("P3".to_string(), "~/work_specific".to_string())));
+        // Should NOT contain personal or dev profiles
         assert!(!projects.contains(&("P1".to_string(), "~/personal".to_string())));
+        assert!(!projects.contains(&("P4".to_string(), "~/dev".to_string())));
+    }
+
+    #[test]
+    fn test_config_keyed_projects_all_profiles_explicit() {
+        let temp = TempDir::new().unwrap();
+
+        temp.child("test_config.json")
+            .write_str(
+                r#"{
+            "search": {
+                "dirs": [],
+                "vsc": [],
+                "cmd": []
+            },
+            "projects": {
+                "default": {
+                    "P0": "~/base"
+                },
+                "profiles": {
+                    "personal": {
+                        "P1": "~/personal"
+                    },
+                    "work": {
+                        "P2": "~/work"
+                    }
+                }
+            }
+        }"#,
+            )
+            .unwrap();
+
+        // Explicitly specify all profiles
+        let config = Config::load_from_path(
+            Some(temp.path().join("test_config.json")),
+            Some(vec!["personal".to_string(), "work".to_string()]),
+        )
+        .unwrap();
+        let projects = config.keyed_projects();
+
+        // All profiles should be merged (base + personal + work)
+        assert_eq!(projects.len(), 3);
+        assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
+        assert!(projects.contains(&("P1".to_string(), "~/personal".to_string())));
+        assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
+    }
+
+    #[test]
+    fn test_config_keyed_projects_profile_override() {
+        let temp = TempDir::new().unwrap();
+
+        temp.child("test_config.json")
+            .write_str(
+                r#"{
+            "search": {
+                "dirs": [],
+                "vsc": [],
+                "cmd": []
+            },
+            "projects": {
+                "default": {
+                    "P0": "~/base",
+                    "P1": "~/base_default"
+                },
+                "profiles": {
+                    "personal": {
+                        "P1": "~/personal_override"
+                    },
+                    "work": {
+                        "P1": "~/work_override",
+                        "P2": "~/work"
+                    }
+                }
+            }
+        }"#,
+            )
+            .unwrap();
+
+        let config =
+            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        let projects = config.keyed_projects();
+
+        // When no profiles are specified, only base projects should be used
+        assert_eq!(projects.len(), 2);
+        assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
+        assert!(projects.contains(&("P1".to_string(), "~/base_default".to_string())));
+        assert!(!projects.contains(&("P2".to_string(), "~/work".to_string())));
     }
 
     #[test]
@@ -321,16 +441,19 @@ mod tests {
                     "cmd": []
                 }},
                 "projects": {{
-                    "*": {{}},
-                    "personal": {{}},
-                    "work": {{}}
+                    "default": {{}},
+                    "profiles": {{
+                        "personal": {{}},
+                        "work": {{}}
+                    }}
                 }}
             }}"#,
                 temp.path().display()
             ))
             .unwrap();
 
-        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let config =
+            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
         let directories = config.expanded_directories().unwrap();
 
         assert_eq!(directories.len(), 2);
@@ -379,9 +502,11 @@ mod tests {
                 "cmd": []
             }},
             "projects": {{
-                "*": {{}},
-                "personal": {{}},
-                "work": {{}}
+                "default": {{}},
+                "profiles": {{
+                    "personal": {{}},
+                    "work": {{}}
+                }}
             }}
         }}"#,
             temp.path().display(),
@@ -436,9 +561,11 @@ mod tests {
                 "cmd": []
             }},
             "projects": {{
-                "*": {{}},
-                "personal": {{}},
-                "work": {{}}
+                "default": {{}},
+                "profiles": {{
+                    "personal": {{}},
+                    "work": {{}}
+                }}
             }}
         }}"#,
             temp.path().display(),
@@ -494,9 +621,11 @@ mod tests {
                 "vsc": ["{}/dev", "{}/work"]
             }},
             "projects": {{
-                "*": {{}},
-                "personal": {{}},
-                "work": {{}}
+                "default": {{}},
+                "profiles": {{
+                    "personal": {{}},
+                    "work": {{}}
+                }}
             }}
         }}"#,
             temp.path().display(),
@@ -507,7 +636,8 @@ mod tests {
             .write_str(&config_content)
             .unwrap();
 
-        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let config =
+            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
         let git_projects = config.discover_git_projects().unwrap();
 
         assert_eq!(git_projects.len(), 4);
@@ -549,9 +679,11 @@ mod tests {
                 "vsc": ["{}"]
             }},
             "projects": {{
-                "*": {{}},
-                "personal": {{}},
-                "work": {{}}
+                "default": {{}},
+                "profiles": {{
+                    "personal": {{}},
+                    "work": {{}}
+                }}
             }}
         }}"#,
             temp.path().display()
@@ -561,7 +693,8 @@ mod tests {
             .write_str(&config_content)
             .unwrap();
 
-        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let config =
+            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
         let git_projects = config.discover_git_projects().unwrap();
 
         assert_eq!(git_projects.len(), 1);
@@ -593,9 +726,11 @@ mod tests {
                 "vsc": ["{}/git_projects"]
             }},
             "projects": {{
-                "*": {{}},
-                "personal": {{}},
-                "work": {{}}
+                "default": {{}},
+                "profiles": {{
+                    "personal": {{}},
+                    "work": {{}}
+                }}
             }}
         }}"#,
             temp.path().display(),
@@ -607,7 +742,8 @@ mod tests {
             .write_str(&config_content)
             .unwrap();
 
-        let config = Config::load_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let config =
+            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
         let all_dirs = config.expanded_directories().unwrap();
 
         // Should include both regular dirs and discovered git projects
