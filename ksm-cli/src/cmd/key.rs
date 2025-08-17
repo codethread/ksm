@@ -103,20 +103,15 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
-        let config_content = r#"{
-        "search": {
-            "dirs": [],
-            "vsc": [],
-            "cmd": []
-        },
-        "projects": {
-            "default": {},
-            "personal": {},
-            "work": {}
-        }
-    }"#;
+        let config_content = r#"[global]
+version = "1.0"
 
-        let config_file = temp_dir.join("test_config.json");
+[search]
+dirs = []
+vsc = []
+"#;
+
+        let config_file = temp_dir.join("test_config.toml");
         fs::write(&config_file, config_content).unwrap();
 
         Config::load_from_path(Some(config_file), None).unwrap()

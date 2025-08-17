@@ -1,6 +1,7 @@
 use anyhow::Result;
 use glob::glob;
 use log::{debug, error, info};
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -9,29 +10,98 @@ use std::path::PathBuf;
 
 pub type KeyedProject = (String, String);
 
-#[derive(Debug, Deserialize)]
-struct SessionConfigData {
-    search: ConfigSearchData,
-    projects: HashMap<String, HashMap<String, String>>,
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum ProjectDefinition {
+    Simple(String),
+    Detailed {
+        path: String,
+        description: Option<String>,
+    },
+}
+
+impl ProjectDefinition {
+    pub fn path(&self) -> &str {
+        match self {
+            ProjectDefinition::Simple(path) => path,
+            ProjectDefinition::Detailed { path, .. } => path,
+        }
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            ProjectDefinition::Simple(_) => None,
+            ProjectDefinition::Detailed { description, .. } => description.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
-struct ConfigSearchData {
-    dirs: Vec<String>,
-    vsc: Vec<String>,
-    // #[allow(dead_code)]
-    // cmd: Vec<serde_json::Value>,
+struct SessionConfigData {
+    global: Option<GlobalConfig>,
+    search: Option<SearchConfig>,
+    projects: Option<HashMap<String, ProjectDefinition>>,
+    keys: Option<HashMap<String, String>>,
+    profiles: Option<HashMap<String, ProfileConfig>>,
+    auto_profile: Option<AutoProfileConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlobalConfig {
+    version: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct ProfileConfig {
+    extends: Option<ProfileExtends>,
+    search: Option<SearchConfig>,
+    projects: Option<HashMap<String, ProjectDefinition>>,
+    keys: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+enum ProfileExtends {
+    Single(String),
+    Disabled(bool), // for extends = false
+}
+
+#[derive(Debug, Deserialize)]
+struct AutoProfileConfig {
+    rules: Vec<AutoProfileRule>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct AutoProfileRule {
+    hostname_regex: Option<String>,
+    env: Option<HashMap<String, String>>,
+    ssh_session: Option<bool>,
+    default: Option<bool>,
+    profile: String,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+struct SearchConfig {
+    dirs: Option<Vec<String>>,
+    vsc: Option<Vec<String>>,
+    max_depth: Option<u32>,
+    exclude: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    dirs: Vec<String>,
-    vsc_dirs: Vec<String>,
-    base: Vec<KeyedProject>,
-    /// profiles chosen for use, either implicitly or explicitly via args
-    profiles: Vec<String>,
-    /// all available profiles from the config file
-    available_profiles: HashMap<String, Vec<KeyedProject>>,
+    // Raw config data
+    #[allow(dead_code)]
+    global_version: Option<String>,
+    base_search: SearchConfig,
+    base_projects: HashMap<String, ProjectDefinition>,
+    base_keys: HashMap<String, String>,
+    profiles: HashMap<String, ProfileConfig>,
+    #[allow(dead_code)]
+    auto_profile_rules: Vec<AutoProfileRule>,
+
+    // Runtime state
+    selected_profiles: Vec<String>,
 }
 
 impl Config {
@@ -57,69 +127,262 @@ impl Config {
 
         debug!("Loaded config {:?}", content);
 
-        let data: SessionConfigData = serde_json::from_str(&content).map_err(|e| {
-            error!("Failed to parse config JSON: {}", e);
+        let data: SessionConfigData = toml::from_str(&content).map_err(|e| {
+            error!("Failed to parse config TOML: {}", e);
             e
         })?;
 
         Self::from_config_data(data, profiles)
     }
 
-    fn from_config_data(data: SessionConfigData, profiles: Option<Vec<String>>) -> Result<Self> {
-        // Convert projects HashMap<String, HashMap<String, String>> to HashMap<String, Vec<KeyedProject>>
-        let available_profiles: HashMap<String, Vec<KeyedProject>> = data
-            .projects
-            .into_iter()
-            .map(|(profile_name, profile_map)| {
-                let keyed_projects: Vec<KeyedProject> = profile_map.into_iter().collect();
-                (profile_name, keyed_projects)
-            })
-            .collect();
+    fn from_config_data(
+        data: SessionConfigData,
+        manual_profile: Option<Vec<String>>,
+    ) -> Result<Self> {
+        let global_version = data.global.map(|g| g.version);
+        let base_search = data.search.unwrap_or_default();
+        let base_projects = data.projects.unwrap_or_default();
+        let base_keys = data.keys.unwrap_or_default();
+        let profiles = data.profiles.unwrap_or_default();
+        let auto_profile_rules = data.auto_profile.map(|ap| ap.rules).unwrap_or_default();
 
-        let profile_count: usize = available_profiles.values().map(|v| v.len()).sum();
+        // Determine which profiles to use
+        let selected_profiles = if let Some(manual_profiles) = manual_profile {
+            // Use all manual profiles if provided
+            manual_profiles
+        } else {
+            // Use auto-selection rules
+            if let Some(auto_profile) = Self::select_auto_profile(&auto_profile_rules)? {
+                vec![auto_profile]
+            } else {
+                vec![]
+            }
+        };
+
+        let profile_count: usize = profiles
+            .values()
+            .map(|p| p.projects.as_ref().map(|proj| proj.len()).unwrap_or(0))
+            .sum();
+        let base_project_count = base_projects.len();
 
         info!(
-            "Successfully loaded config with {} profile projects across {} profiles",
+            "Successfully loaded config with {} base projects and {} profile projects across {} profiles",
+            base_project_count,
             profile_count,
-            available_profiles.len()
+            profiles.len()
         );
 
-        // Use only the profiles provided by the user, or empty list if none provided
-        let selected_profiles = profiles.unwrap_or_default();
+        if !selected_profiles.is_empty() {
+            info!("Selected profiles: {:?}", selected_profiles);
+        }
 
         Ok(Config {
-            profiles: selected_profiles,
-            dirs: data.search.dirs,
-            vsc_dirs: data.search.vsc,
-            base: Vec::new(), // No more base projects - all are in profiles
-            available_profiles,
+            global_version,
+            base_search,
+            base_projects,
+            base_keys,
+            profiles,
+            auto_profile_rules,
+            selected_profiles,
         })
     }
 
     pub fn keyed_projects(&self) -> Vec<KeyedProject> {
-        // Start with base projects as a HashMap to handle key overrides
-        let mut project_map: HashMap<String, String> = self.base.iter().cloned().collect();
+        let resolved_keys = self.resolved_keys();
+        let resolved_projects = self.resolved_projects();
 
-        // Merge selected profiles in alphabetical order, with later profiles overriding earlier ones
-        let mut selected_profile_names = self.profiles.clone();
-        selected_profile_names.sort();
+        resolved_keys
+            .into_iter()
+            .filter_map(|(key, project_name)| {
+                resolved_projects
+                    .get(&project_name)
+                    .map(|project_def| (key, project_def.path().to_string()))
+            })
+            .collect()
+    }
 
-        for profile_name in selected_profile_names {
-            if let Some(profile_projects) = self.available_profiles.get(&profile_name) {
-                for (key, value) in profile_projects {
-                    project_map.insert(key.clone(), value.clone());
+    fn select_auto_profile(auto_profile_rules: &[AutoProfileRule]) -> Result<Option<String>> {
+        for rule in auto_profile_rules {
+            if Self::rule_matches(rule)? {
+                return Ok(Some(rule.profile.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    fn rule_matches(rule: &AutoProfileRule) -> Result<bool> {
+        // Check hostname regex
+        if let Some(ref hostname_regex) = rule.hostname_regex {
+            if let Ok(hostname) = hostname::get() {
+                let regex = Regex::new(hostname_regex)?;
+                if regex.is_match(&hostname.to_string_lossy()) {
+                    return Ok(true);
                 }
             }
         }
 
-        // Convert back to Vec<KeyedProject>
-        project_map.into_iter().collect()
+        // Check environment variables
+        if let Some(ref env_vars) = rule.env {
+            for (key, expected_value) in env_vars {
+                if let Ok(actual_value) = env::var(key) {
+                    if &actual_value == expected_value {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
+        // Check SSH session
+        if let Some(ssh_session) = rule.ssh_session {
+            let is_ssh = env::var("SSH_CLIENT").is_ok() || env::var("SSH_TTY").is_ok();
+            if ssh_session == is_ssh {
+                return Ok(true);
+            }
+        }
+
+        // Check default rule
+        if rule.default.unwrap_or(false) {
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    fn resolved_search(&self) -> SearchConfig {
+        let mut result = self.base_search.clone();
+
+        for profile_name in &self.selected_profiles {
+            if self.profiles.contains_key(profile_name) {
+                let profile_chain = self.build_profile_chain(profile_name);
+
+                for chain_profile_name in profile_chain {
+                    if let Some(chain_profile) = self.profiles.get(&chain_profile_name) {
+                        if let Some(ref search) = chain_profile.search {
+                            // Merge arrays by concatenation
+                            if let Some(ref profile_dirs) = search.dirs {
+                                result
+                                    .dirs
+                                    .get_or_insert_with(Vec::new)
+                                    .extend(profile_dirs.clone());
+                            }
+                            if let Some(ref profile_vsc) = search.vsc {
+                                result
+                                    .vsc
+                                    .get_or_insert_with(Vec::new)
+                                    .extend(profile_vsc.clone());
+                            }
+                            // Override scalar values
+                            if search.max_depth.is_some() {
+                                result.max_depth = search.max_depth;
+                            }
+                            if let Some(ref profile_exclude) = search.exclude {
+                                result
+                                    .exclude
+                                    .get_or_insert_with(Vec::new)
+                                    .extend(profile_exclude.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    fn resolved_projects(&self) -> HashMap<String, ProjectDefinition> {
+        let mut result = self.base_projects.clone();
+
+        for profile_name in &self.selected_profiles {
+            if self.profiles.contains_key(profile_name) {
+                let profile_chain = self.build_profile_chain(profile_name);
+
+                for chain_profile_name in profile_chain {
+                    if let Some(chain_profile) = self.profiles.get(&chain_profile_name) {
+                        if let Some(ref projects) = chain_profile.projects {
+                            // Later profiles override earlier ones
+                            result.extend(projects.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    fn resolved_keys(&self) -> HashMap<String, String> {
+        let mut result = self.base_keys.clone();
+
+        for profile_name in &self.selected_profiles {
+            if self.profiles.contains_key(profile_name) {
+                let profile_chain = self.build_profile_chain(profile_name);
+
+                for chain_profile_name in profile_chain {
+                    if let Some(chain_profile) = self.profiles.get(&chain_profile_name) {
+                        if let Some(ref keys) = chain_profile.keys {
+                            // Later profiles override earlier ones
+                            result.extend(keys.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    fn build_profile_chain(&self, profile_name: &str) -> Vec<String> {
+        let mut chain = Vec::new();
+        let mut current_profile_name = profile_name.to_string();
+        let mut visited = std::collections::HashSet::new();
+
+        loop {
+            if visited.contains(&current_profile_name) {
+                // Prevent infinite loops
+                break;
+            }
+            visited.insert(current_profile_name.clone());
+
+            if let Some(profile) = self.profiles.get(&current_profile_name) {
+                match &profile.extends {
+                    Some(ProfileExtends::Single(extends_name)) => {
+                        chain.push(current_profile_name.clone());
+                        current_profile_name = extends_name.clone();
+                    }
+                    Some(ProfileExtends::Disabled(false)) => {
+                        // extends = false, don't extend base
+                        chain.push(current_profile_name);
+                        break;
+                    }
+                    None => {
+                        // No extends, use base + this profile
+                        chain.push(current_profile_name);
+                        break;
+                    }
+                    Some(ProfileExtends::Disabled(true)) => {
+                        // This shouldn't happen but treat as no extends
+                        chain.push(current_profile_name);
+                        break;
+                    }
+                }
+            } else {
+                // Profile not found
+                break;
+            }
+        }
+
+        // Reverse to get correct order (base -> ... -> target)
+        chain.reverse();
+        chain
     }
 
     pub fn expanded_directories(&self) -> Result<Vec<String>> {
         let mut expanded_dirs = Vec::new();
+        let resolved_search = self.resolved_search();
 
-        for dir_pattern in &self.dirs {
+        let dirs = resolved_search.dirs.unwrap_or_default();
+        for dir_pattern in &dirs {
             let expanded_path = shellexpand::tilde(dir_pattern);
 
             // Check if the pattern contains glob characters
@@ -162,13 +425,15 @@ impl Config {
 
     fn discover_git_projects(&self) -> Result<Vec<String>> {
         let mut git_projects = Vec::new();
+        let resolved_search = self.resolved_search();
+        let vsc_dirs = resolved_search.vsc.clone().unwrap_or_default();
 
-        for vsc_dir_pattern in &self.vsc_dirs {
+        for vsc_dir_pattern in &vsc_dirs {
             let expanded_path = shellexpand::tilde(vsc_dir_pattern);
             let vsc_path = PathBuf::from(expanded_path.as_ref());
 
             if vsc_path.exists() && vsc_path.is_dir() {
-                self.find_git_projects_recursive(&vsc_path, &mut git_projects)?;
+                self.find_git_projects_recursive(&vsc_path, &mut git_projects, &resolved_search)?;
             }
         }
 
@@ -179,14 +444,24 @@ impl Config {
         &self,
         dir: &PathBuf,
         git_projects: &mut Vec<String>,
+        search_config: &SearchConfig,
     ) -> Result<()> {
-        Self::find_git_projects_recursive_helper(dir, git_projects)
+        Self::find_git_projects_recursive_helper(dir, git_projects, search_config, 0)
     }
 
     fn find_git_projects_recursive_helper(
         dir: &PathBuf,
         git_projects: &mut Vec<String>,
+        search_config: &SearchConfig,
+        current_depth: u32,
     ) -> Result<()> {
+        // Check max_depth limit
+        if let Some(max_depth) = search_config.max_depth {
+            if current_depth >= max_depth {
+                return Ok(());
+            }
+        }
+
         let git_dir = dir.join(".git");
 
         if git_dir.exists() {
@@ -201,9 +476,29 @@ impl Config {
                 let path = entry.path();
                 if path.is_dir() {
                     if let Some(dir_name) = path.file_name() {
-                        if !dir_name.to_string_lossy().starts_with('.') {
-                            Self::find_git_projects_recursive_helper(&path, git_projects)?;
+                        let dir_name_str = dir_name.to_string_lossy();
+
+                        // Skip hidden directories
+                        if dir_name_str.starts_with('.') {
+                            continue;
                         }
+
+                        // Check exclude patterns
+                        if let Some(ref exclude_patterns) = search_config.exclude {
+                            if exclude_patterns
+                                .iter()
+                                .any(|pattern| dir_name_str.contains(pattern))
+                            {
+                                continue;
+                            }
+                        }
+
+                        Self::find_git_projects_recursive_helper(
+                            &path,
+                            git_projects,
+                            search_config,
+                            current_depth + 1,
+                        )?;
                     }
                 }
             }
@@ -215,7 +510,7 @@ impl Config {
 
 fn get_config_path() -> PathBuf {
     let home = env::var("HOME").unwrap_or_default();
-    PathBuf::from(home).join(".local/data/sessions.json")
+    PathBuf::from(home).join(".local/data/sessions.toml")
 }
 
 #[cfg(test)]
@@ -231,120 +526,484 @@ mod tests {
     use assert_fs::prelude::*;
     use std::path::PathBuf;
 
+    mod test_helpers {
+        use super::*;
+
+        pub struct ConfigBuilder {
+            global_version: Option<String>,
+            search_dirs: Vec<String>,
+            search_vsc: Vec<String>,
+            search_max_depth: Option<u32>,
+            search_exclude: Vec<String>,
+            base_projects: Vec<(String, String)>,
+            base_keys: Vec<(String, String)>,
+            profiles: Vec<ProfileBuilder>,
+            auto_profile_rules: Vec<AutoProfileRuleBuilder>,
+        }
+
+        pub struct ProfileBuilder {
+            name: String,
+            extends: Option<String>,
+            extends_disabled: bool,
+            search_dirs: Vec<String>,
+            search_vsc: Vec<String>,
+            search_max_depth: Option<u32>,
+            search_exclude: Vec<String>,
+            projects: Vec<(String, String)>,
+            detailed_projects: Vec<(String, String, String)>, // (name, path, description)
+            keys: Vec<(String, String)>,
+        }
+
+        pub struct AutoProfileRuleBuilder {
+            hostname_regex: Option<String>,
+            env: Vec<(String, String)>,
+            ssh_session: Option<bool>,
+            default: Option<bool>,
+            profile: String,
+        }
+
+        #[allow(dead_code)]
+        impl ConfigBuilder {
+            pub fn new() -> Self {
+                Self {
+                    global_version: Some("1.0".to_string()),
+                    search_dirs: Vec::new(),
+                    search_vsc: Vec::new(),
+                    search_max_depth: None,
+                    search_exclude: Vec::new(),
+                    base_projects: Vec::new(),
+                    base_keys: Vec::new(),
+                    profiles: Vec::new(),
+                    auto_profile_rules: Vec::new(),
+                }
+            }
+
+            pub fn version(mut self, version: &str) -> Self {
+                self.global_version = Some(version.to_string());
+                self
+            }
+
+            pub fn search_dirs(mut self, dirs: Vec<&str>) -> Self {
+                self.search_dirs = dirs.into_iter().map(|s| s.to_string()).collect();
+                self
+            }
+
+            pub fn search_vsc(mut self, vsc: Vec<&str>) -> Self {
+                self.search_vsc = vsc.into_iter().map(|s| s.to_string()).collect();
+                self
+            }
+
+            pub fn search_max_depth(mut self, depth: u32) -> Self {
+                self.search_max_depth = Some(depth);
+                self
+            }
+
+            pub fn search_exclude(mut self, exclude: Vec<&str>) -> Self {
+                self.search_exclude = exclude.into_iter().map(|s| s.to_string()).collect();
+                self
+            }
+
+            pub fn base_project(mut self, name: &str, path: &str) -> Self {
+                self.base_projects
+                    .push((name.to_string(), path.to_string()));
+                self
+            }
+
+            pub fn base_key(mut self, key: &str, project: &str) -> Self {
+                self.base_keys.push((key.to_string(), project.to_string()));
+                self
+            }
+
+            pub fn profile(mut self, profile: ProfileBuilder) -> Self {
+                self.profiles.push(profile);
+                self
+            }
+
+            pub fn auto_profile_rule(mut self, rule: AutoProfileRuleBuilder) -> Self {
+                self.auto_profile_rules.push(rule);
+                self
+            }
+
+            pub fn build_toml(&self) -> String {
+                let mut toml = String::new();
+
+                // Global section
+                if let Some(ref version) = self.global_version {
+                    toml.push_str(&format!("[global]\nversion = \"{}\"\n\n", version));
+                }
+
+                // Search section
+                if !self.search_dirs.is_empty()
+                    || !self.search_vsc.is_empty()
+                    || self.search_max_depth.is_some()
+                    || !self.search_exclude.is_empty()
+                {
+                    toml.push_str("[search]\n");
+                    if !self.search_dirs.is_empty() {
+                        let dirs_str = self
+                            .search_dirs
+                            .iter()
+                            .map(|d| format!("\"{}\"", d))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        toml.push_str(&format!("dirs = [{}]\n", dirs_str));
+                    }
+                    if !self.search_vsc.is_empty() {
+                        let vsc_str = self
+                            .search_vsc
+                            .iter()
+                            .map(|v| format!("\"{}\"", v))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        toml.push_str(&format!("vsc = [{}]\n", vsc_str));
+                    }
+                    if let Some(depth) = self.search_max_depth {
+                        toml.push_str(&format!("max_depth = {}\n", depth));
+                    }
+                    if !self.search_exclude.is_empty() {
+                        let exclude_str = self
+                            .search_exclude
+                            .iter()
+                            .map(|e| format!("\"{}\"", e))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        toml.push_str(&format!("exclude = [{}]\n", exclude_str));
+                    }
+                    toml.push('\n');
+                }
+
+                // Base projects section
+                if !self.base_projects.is_empty() {
+                    toml.push_str("[projects]\n");
+                    for (name, path) in &self.base_projects {
+                        toml.push_str(&format!("{} = \"{}\"\n", name, path));
+                    }
+                    toml.push('\n');
+                }
+
+                // Base keys section
+                if !self.base_keys.is_empty() {
+                    toml.push_str("[keys]\n");
+                    for (key, project) in &self.base_keys {
+                        toml.push_str(&format!("{} = \"{}\"\n", key, project));
+                    }
+                    toml.push('\n');
+                }
+
+                // Profiles
+                for profile in &self.profiles {
+                    toml.push_str(&profile.build_toml());
+                }
+
+                // Auto profile rules
+                if !self.auto_profile_rules.is_empty() {
+                    toml.push_str("[auto_profile]\n\n");
+                    for rule in &self.auto_profile_rules {
+                        toml.push_str(&rule.build_toml());
+                    }
+                }
+
+                toml
+            }
+
+            pub fn write_to_temp_file(&self, temp: &TempDir, filename: &str) -> std::path::PathBuf {
+                let file_path = temp.path().join(filename);
+                temp.child(filename).write_str(&self.build_toml()).unwrap();
+                file_path
+            }
+        }
+
+        #[allow(dead_code)]
+        impl ProfileBuilder {
+            pub fn new(name: &str) -> Self {
+                Self {
+                    name: name.to_string(),
+                    extends: None,
+                    extends_disabled: false,
+                    search_dirs: Vec::new(),
+                    search_vsc: Vec::new(),
+                    search_max_depth: None,
+                    search_exclude: Vec::new(),
+                    projects: Vec::new(),
+                    detailed_projects: Vec::new(),
+                    keys: Vec::new(),
+                }
+            }
+
+            pub fn extends(mut self, profile: &str) -> Self {
+                self.extends = Some(profile.to_string());
+                self
+            }
+
+            pub fn extends_disabled(mut self) -> Self {
+                self.extends_disabled = true;
+                self
+            }
+
+            pub fn search_dirs(mut self, dirs: Vec<&str>) -> Self {
+                self.search_dirs = dirs.into_iter().map(|s| s.to_string()).collect();
+                self
+            }
+
+            pub fn search_vsc(mut self, vsc: Vec<&str>) -> Self {
+                self.search_vsc = vsc.into_iter().map(|s| s.to_string()).collect();
+                self
+            }
+
+            pub fn search_max_depth(mut self, depth: u32) -> Self {
+                self.search_max_depth = Some(depth);
+                self
+            }
+
+            pub fn search_exclude(mut self, exclude: Vec<&str>) -> Self {
+                self.search_exclude = exclude.into_iter().map(|s| s.to_string()).collect();
+                self
+            }
+
+            pub fn project(mut self, name: &str, path: &str) -> Self {
+                self.projects.push((name.to_string(), path.to_string()));
+                self
+            }
+
+            pub fn detailed_project(mut self, name: &str, path: &str, description: &str) -> Self {
+                self.detailed_projects.push((
+                    name.to_string(),
+                    path.to_string(),
+                    description.to_string(),
+                ));
+                self
+            }
+
+            pub fn key(mut self, key: &str, project: &str) -> Self {
+                self.keys.push((key.to_string(), project.to_string()));
+                self
+            }
+
+            fn build_toml(&self) -> String {
+                let mut toml = String::new();
+
+                // Profile header with extends
+                if self.extends_disabled {
+                    toml.push_str(&format!("[profiles.{}]\nextends = false\n\n", self.name));
+                } else if let Some(ref extends) = self.extends {
+                    toml.push_str(&format!(
+                        "[profiles.{}]\nextends = '{}'\n\n",
+                        self.name, extends
+                    ));
+                }
+
+                // Profile search section
+                if !self.search_dirs.is_empty()
+                    || !self.search_vsc.is_empty()
+                    || self.search_max_depth.is_some()
+                    || !self.search_exclude.is_empty()
+                {
+                    toml.push_str(&format!("[profiles.{}.search]\n", self.name));
+                    if !self.search_dirs.is_empty() {
+                        let dirs_str = self
+                            .search_dirs
+                            .iter()
+                            .map(|d| format!("\"{}\"", d))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        toml.push_str(&format!("dirs = [{}]\n", dirs_str));
+                    }
+                    if !self.search_vsc.is_empty() {
+                        let vsc_str = self
+                            .search_vsc
+                            .iter()
+                            .map(|v| format!("\"{}\"", v))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        toml.push_str(&format!("vsc = [{}]\n", vsc_str));
+                    }
+                    if let Some(depth) = self.search_max_depth {
+                        toml.push_str(&format!("max_depth = {}\n", depth));
+                    }
+                    if !self.search_exclude.is_empty() {
+                        let exclude_str = self
+                            .search_exclude
+                            .iter()
+                            .map(|e| format!("\"{}\"", e))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        toml.push_str(&format!("exclude = [{}]\n", exclude_str));
+                    }
+                    toml.push('\n');
+                }
+
+                // Profile projects section
+                if !self.projects.is_empty() || !self.detailed_projects.is_empty() {
+                    toml.push_str(&format!("[profiles.{}.projects]\n", self.name));
+                    for (name, path) in &self.projects {
+                        toml.push_str(&format!("{} = \"{}\"\n", name, path));
+                    }
+                    toml.push('\n');
+
+                    // Detailed projects as tables
+                    for (name, path, description) in &self.detailed_projects {
+                        toml.push_str(&format!("[profiles.{}.projects.{}]\n", self.name, name));
+                        toml.push_str(&format!("path = \"{}\"\n", path));
+                        toml.push_str(&format!("description = \"{}\"\n\n", description));
+                    }
+                }
+
+                // Profile keys section
+                if !self.keys.is_empty() {
+                    toml.push_str(&format!("[profiles.{}.keys]\n", self.name));
+                    for (key, project) in &self.keys {
+                        toml.push_str(&format!("{} = \"{}\"\n", key, project));
+                    }
+                    toml.push('\n');
+                }
+
+                toml
+            }
+        }
+
+        #[allow(dead_code)]
+        impl AutoProfileRuleBuilder {
+            pub fn new(profile: &str) -> Self {
+                Self {
+                    hostname_regex: None,
+                    env: Vec::new(),
+                    ssh_session: None,
+                    default: None,
+                    profile: profile.to_string(),
+                }
+            }
+
+            pub fn hostname_regex(mut self, regex: &str) -> Self {
+                self.hostname_regex = Some(regex.to_string());
+                self
+            }
+
+            pub fn env_var(mut self, key: &str, value: &str) -> Self {
+                self.env.push((key.to_string(), value.to_string()));
+                self
+            }
+
+            pub fn ssh_session(mut self, is_ssh: bool) -> Self {
+                self.ssh_session = Some(is_ssh);
+                self
+            }
+
+            pub fn default_rule(mut self) -> Self {
+                self.default = Some(true);
+                self
+            }
+
+            fn build_toml(&self) -> String {
+                let mut toml = String::new();
+                toml.push_str("[[auto_profile.rules]]\n");
+
+                if let Some(ref regex) = self.hostname_regex {
+                    toml.push_str(&format!("hostname_regex = \"{}\"\n", regex));
+                }
+
+                if !self.env.is_empty() {
+                    toml.push_str("env = { ");
+                    let env_pairs: Vec<String> = self
+                        .env
+                        .iter()
+                        .map(|(k, v)| format!("{} = \"{}\"", k, v))
+                        .collect();
+                    toml.push_str(&env_pairs.join(", "));
+                    toml.push_str(" }\n");
+                }
+
+                if let Some(ssh) = self.ssh_session {
+                    toml.push_str(&format!("ssh_session = {}\n", ssh));
+                }
+
+                if let Some(default) = self.default {
+                    toml.push_str(&format!("default = {}\n", default));
+                }
+
+                toml.push_str(&format!("profile = \"{}\"\n\n", self.profile));
+                toml
+            }
+        }
+
+        // Convenience functions for common test patterns
+        pub fn simple_config() -> ConfigBuilder {
+            ConfigBuilder::new()
+                .base_project("dots", "~/dotfiles")
+                .base_key("P1", "dots")
+        }
+
+        pub fn config_with_profiles() -> ConfigBuilder {
+            ConfigBuilder::new()
+                .base_project("dots", "~/dotfiles")
+                .base_key("P1", "dots")
+                .profile(
+                    ProfileBuilder::new("work")
+                        .project("frontend", "~/work/frontend")
+                        .project("backend", "~/work/backend")
+                        .key("P2", "frontend")
+                        .key("P3", "backend"),
+                )
+        }
+
+        #[allow(dead_code)]
+        pub fn config_with_search() -> ConfigBuilder {
+            ConfigBuilder::new()
+                .search_dirs(vec!["~/project1", "~/project2"])
+                .search_vsc(vec!["~/dev", "~/work"])
+        }
+    }
+
+    use test_helpers::*;
+
     #[test]
     fn test_config_keyed_projects_no_profiles_only_base() {
         let temp = TempDir::new().unwrap();
+        let config_path = simple_config().write_to_temp_file(&temp, "test_config.toml");
 
-        temp.child("test_config.json")
-            .write_str(
-                r#"{
-            "search": {
-                "dirs": [],
-                "vsc": [],
-                "cmd": []
-            },
-            "projects": {
-                "default": {
-                    "P0": "~/base"
-                },
-                "personal": {
-                    "P1": "~/personal"
-                },
-                "work": {
-                    "P2": "~/work"
-                }
-            }
-        }"#,
-            )
-            .unwrap();
-
-        let config =
-            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        let config = Config::load_from_path(Some(config_path), None).unwrap();
         let projects = config.keyed_projects();
 
-        // When no profiles are specified, no projects should be used (since base is now empty)
-        assert_eq!(projects.len(), 0);
+        // Should use base projects and keys
+        assert_eq!(projects.len(), 1);
+        assert!(projects.contains(&("P1".to_string(), "~/dotfiles".to_string())));
     }
 
     #[test]
     fn test_config_keyed_projects_selected_profiles_only() {
         let temp = TempDir::new().unwrap();
-
-        temp.child("test_config.json")
-            .write_str(
-                r#"{
-            "search": {
-                "dirs": [],
-                "vsc": [],
-                "cmd": []
-            },
-            "projects": {
-                "default": {
-                    "P0": "~/base"
-                },
-                "personal": {
-                    "P1": "~/personal"
-                },
-                "work": {
-                    "P2": "~/work",
-                    "P3": "~/work_specific"
-                },
-                "dev": {
-                    "P4": "~/dev"
-                }
-            }
-        }"#,
-            )
-            .unwrap();
+        let config_path = config_with_profiles().write_to_temp_file(&temp, "test_config.toml");
 
         // Test selecting only "work" profile
-        let config = Config::load_from_path(
-            Some(temp.path().join("test_config.json")),
-            Some(vec!["work".to_string()]),
-        )
-        .unwrap();
+        let config =
+            Config::load_from_path(Some(config_path), Some(vec!["work".to_string()])).unwrap();
         let projects = config.keyed_projects();
 
-        // Should have 2 projects: P2 (work), P3 (work_specific)
-        assert_eq!(projects.len(), 2);
-        assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
-        assert!(projects.contains(&("P3".to_string(), "~/work_specific".to_string())));
-        // Should NOT contain default, personal or dev profiles
-        assert!(!projects.contains(&("P0".to_string(), "~/base".to_string())));
-        assert!(!projects.contains(&("P1".to_string(), "~/personal".to_string())));
-        assert!(!projects.contains(&("P4".to_string(), "~/dev".to_string())));
+        // Should have 3 projects: P1 (base), P2 (frontend), P3 (backend)
+        assert_eq!(projects.len(), 3);
+        assert!(projects.contains(&("P1".to_string(), "~/dotfiles".to_string())));
+        assert!(projects.contains(&("P2".to_string(), "~/work/frontend".to_string())));
+        assert!(projects.contains(&("P3".to_string(), "~/work/backend".to_string())));
     }
 
     #[test]
     fn test_config_keyed_projects_all_profiles_explicit() {
         let temp = TempDir::new().unwrap();
-
-        temp.child("test_config.json")
-            .write_str(
-                r#"{
-            "search": {
-                "dirs": [],
-                "vsc": [],
-                "cmd": []
-            },
-            "projects": {
-                "default": {
-                    "P0": "~/base"
-                },
-                "personal": {
-                    "P1": "~/personal"
-                },
-                "work": {
-                    "P2": "~/work"
-                }
-            }
-        }"#,
+        let config_path = ConfigBuilder::new()
+            .profile(
+                ProfileBuilder::new("personal")
+                    .project("personal_proj", "~/personal")
+                    .key("P1", "personal_proj"),
             )
-            .unwrap();
+            .profile(
+                ProfileBuilder::new("work")
+                    .project("work_proj", "~/work")
+                    .key("P2", "work_proj"),
+            )
+            .write_to_temp_file(&temp, "test_config.toml");
 
         // Explicitly specify all profiles
         let config = Config::load_from_path(
-            Some(temp.path().join("test_config.json")),
+            Some(config_path),
             Some(vec!["personal".to_string(), "work".to_string()]),
         )
         .unwrap();
@@ -354,53 +1013,39 @@ mod tests {
         assert_eq!(projects.len(), 2);
         assert!(projects.contains(&("P1".to_string(), "~/personal".to_string())));
         assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
-        // Should NOT contain default
-        assert!(!projects.contains(&("P0".to_string(), "~/base".to_string())));
     }
 
     #[test]
     fn test_config_keyed_projects_profile_override() {
         let temp = TempDir::new().unwrap();
-
-        temp.child("test_config.json")
-            .write_str(
-                r#"{
-            "search": {
-                "dirs": [],
-                "vsc": [],
-                "cmd": []
-            },
-            "projects": {
-                "default": {
-                    "P0": "~/base",
-                    "P1": "~/base_default"
-                },
-                "personal": {
-                    "P1": "~/personal_override"
-                },
-                "work": {
-                    "P1": "~/work_override",
-                    "P2": "~/work"
-                }
-            }
-        }"#,
+        let config_path = ConfigBuilder::new()
+            .profile(
+                ProfileBuilder::new("personal")
+                    .project("common_proj", "~/personal_override")
+                    .key("P1", "common_proj"),
             )
-            .unwrap();
+            .profile(
+                ProfileBuilder::new("work")
+                    .project("common_proj", "~/work_override") // Override the same project
+                    .project("work_only", "~/work")
+                    .key("P1", "common_proj") // Override the same key
+                    .key("P2", "work_only"),
+            )
+            .write_to_temp_file(&temp, "test_config.toml");
 
         // Test with both personal and work profiles to see override behavior
         let config = Config::load_from_path(
-            Some(temp.path().join("test_config.json")),
+            Some(config_path),
             Some(vec!["personal".to_string(), "work".to_string()]),
         )
         .unwrap();
         let projects = config.keyed_projects();
 
-        // Should have personal and work projects, with work overriding personal for P1
+        // Should have work projects overriding personal ones
         assert_eq!(projects.len(), 2);
         assert!(projects.contains(&("P1".to_string(), "~/work_override".to_string())));
         assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
-        // Should NOT contain default or personal version of P1
-        assert!(!projects.contains(&("P0".to_string(), "~/base".to_string())));
+        // Should NOT contain personal version of P1
         assert!(!projects.contains(&("P1".to_string(), "~/personal_override".to_string())));
     }
 
@@ -413,26 +1058,11 @@ mod tests {
         temp.child("project2/subdir").create_dir_all().unwrap();
         temp.child("non-project").create_dir_all().unwrap();
 
-        temp.child("test_config.json")
-            .write_str(&format!(
-                r#"{{
-                "search": {{
-                    "dirs": ["{}/project*"],
-                    "vsc": [],
-                    "cmd": []
-                }},
-                "projects": {{
-                    "default": {{}},
-                    "personal": {{}},
-                    "work": {{}}
-                }}
-            }}"#,
-                temp.path().display()
-            ))
-            .unwrap();
+        let config_path = ConfigBuilder::new()
+            .search_dirs(vec![&format!("{}/project*", temp.path().display())])
+            .write_to_temp_file(&temp, "test_config.toml");
 
-        let config =
-            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        let config = Config::load_from_path(Some(config_path), None).unwrap();
         let directories = config.expanded_directories().unwrap();
 
         assert_eq!(directories.len(), 2);
@@ -468,36 +1098,16 @@ mod tests {
         temp.child("subdir/nested1").create_dir_all().unwrap();
         temp.child("subdir/nested2").create_dir_all().unwrap();
 
-        let config_content = format!(
-            r#"{{
-            "search": {{
-                "dirs": [
-                    "{}/glob_*",
-                    "{}/regular_project1",
-                    "{}/regular_project2",
-                    "{}/subdir/*"
-                ],
-                "vsc": [],
-                "cmd": []
-            }},
-            "projects": {{
-                "default": {{}},
-                "personal": {{}},
-                "work": {{}}
-            }}
-        }}"#,
-            temp.path().display(),
-            temp.path().display(),
-            temp.path().display(),
-            temp.path().display()
-        );
+        let config_path = ConfigBuilder::new()
+            .search_dirs(vec![
+                &format!("{}/glob_*", temp.path().display()),
+                &format!("{}/regular_project1", temp.path().display()),
+                &format!("{}/regular_project2", temp.path().display()),
+                &format!("{}/subdir/*", temp.path().display()),
+            ])
+            .write_to_temp_file(&temp, "test_config.toml");
 
-        temp.child("test_config.json")
-            .write_str(&config_content)
-            .unwrap();
-
-        let result =
-            get_all_directories_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let result = get_all_directories_from_path(Some(config_path)).unwrap();
 
         // Should find: glob_project1, glob_project2, regular_project1 (literal), regular_project2 (literal), nested1, nested2
         assert_eq!(result.len(), 6);
@@ -526,33 +1136,15 @@ mod tests {
         // Create one existing directory
         temp.child("existing_dir").create_dir_all().unwrap();
 
-        let config_content = format!(
-            r#"{{
-            "search": {{
-                "dirs": [
-                    "{}/existing_dir",
-                    "{}/nonexistent_dir",
-                    "~/dev"
-                ],
-                "vsc": [],
-                "cmd": []
-            }},
-            "projects": {{
-                "default": {{}},
-                "personal": {{}},
-                "work": {{}}
-            }}
-        }}"#,
-            temp.path().display(),
-            temp.path().display()
-        );
+        let config_path = ConfigBuilder::new()
+            .search_dirs(vec![
+                &format!("{}/existing_dir", temp.path().display()),
+                &format!("{}/nonexistent_dir", temp.path().display()),
+                "~/dev",
+            ])
+            .write_to_temp_file(&temp, "test_config.toml");
 
-        temp.child("test_config.json")
-            .write_str(&config_content)
-            .unwrap();
-
-        let result =
-            get_all_directories_from_path(Some(temp.path().join("test_config.json"))).unwrap();
+        let result = get_all_directories_from_path(Some(config_path)).unwrap();
 
         // Should contain all 3 paths as literals, regardless of existence
         assert_eq!(result.len(), 3);
@@ -589,28 +1181,14 @@ mod tests {
             .unwrap();
         temp.child("work/repo1/.git").create_dir_all().unwrap();
 
-        let config_content = format!(
-            r#"{{
-            "search": {{
-                "dirs": [],
-                "vsc": ["{}/dev", "{}/work"]
-            }},
-            "projects": {{
-                "default": {{}},
-                "personal": {{}},
-                "work": {{}}
-            }}
-        }}"#,
-            temp.path().display(),
-            temp.path().display()
-        );
+        let config_path = ConfigBuilder::new()
+            .search_vsc(vec![
+                &format!("{}/dev", temp.path().display()),
+                &format!("{}/work", temp.path().display()),
+            ])
+            .write_to_temp_file(&temp, "test_config.toml");
 
-        temp.child("test_config.json")
-            .write_str(&config_content)
-            .unwrap();
-
-        let config =
-            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        let config = Config::load_from_path(Some(config_path), None).unwrap();
         let git_projects = config.discover_git_projects().unwrap();
 
         assert_eq!(git_projects.len(), 4);
@@ -645,27 +1223,11 @@ mod tests {
             .create_dir_all()
             .unwrap();
 
-        let config_content = format!(
-            r#"{{
-            "search": {{
-                "dirs": [],
-                "vsc": ["{}"]
-            }},
-            "projects": {{
-                "default": {{}},
-                "personal": {{}},
-                "work": {{}}
-            }}
-        }}"#,
-            temp.path().display()
-        );
+        let config_path = ConfigBuilder::new()
+            .search_vsc(vec![&temp.path().display().to_string()])
+            .write_to_temp_file(&temp, "test_config.toml");
 
-        temp.child("test_config.json")
-            .write_str(&config_content)
-            .unwrap();
-
-        let config =
-            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        let config = Config::load_from_path(Some(config_path), None).unwrap();
         let git_projects = config.discover_git_projects().unwrap();
 
         assert_eq!(git_projects.len(), 1);
@@ -690,29 +1252,15 @@ mod tests {
             .create_dir_all()
             .unwrap();
 
-        let config_content = format!(
-            r#"{{
-            "search": {{
-                "dirs": ["{}/regular_dir1", "{}/regular_dir2"],
-                "vsc": ["{}/git_projects"]
-            }},
-            "projects": {{
-                "default": {{}},
-                "personal": {{}},
-                "work": {{}}
-            }}
-        }}"#,
-            temp.path().display(),
-            temp.path().display(),
-            temp.path().display()
-        );
+        let config_path = ConfigBuilder::new()
+            .search_dirs(vec![
+                &format!("{}/regular_dir1", temp.path().display()),
+                &format!("{}/regular_dir2", temp.path().display()),
+            ])
+            .search_vsc(vec![&format!("{}/git_projects", temp.path().display())])
+            .write_to_temp_file(&temp, "test_config.toml");
 
-        temp.child("test_config.json")
-            .write_str(&config_content)
-            .unwrap();
-
-        let config =
-            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        let config = Config::load_from_path(Some(config_path), None).unwrap();
         let all_dirs = config.expanded_directories().unwrap();
 
         // Should include both regular dirs and discovered git projects
