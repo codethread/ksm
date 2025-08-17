@@ -12,7 +12,7 @@ pub type KeyedProject = (String, String);
 #[derive(Debug, Deserialize)]
 struct SessionConfigData {
     search: ConfigSearchData,
-    projects: ConfigProjectsData,
+    projects: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -21,12 +21,6 @@ struct ConfigSearchData {
     vsc: Vec<String>,
     // #[allow(dead_code)]
     // cmd: Vec<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConfigProjectsData {
-    default: Option<HashMap<String, String>>,
-    profiles: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,17 +66,9 @@ impl Config {
     }
 
     fn from_config_data(data: SessionConfigData, profiles: Option<Vec<String>>) -> Result<Self> {
-        // Extract base projects from the "default" key if it exists
-        let default = if let Some(default_map) = data.projects.default {
-            default_map.into_iter().collect()
-        } else {
-            Vec::new()
-        };
-
-        // Convert profiles HashMap<String, HashMap<String, String>> to HashMap<String, Vec<KeyedProject>>
+        // Convert projects HashMap<String, HashMap<String, String>> to HashMap<String, Vec<KeyedProject>>
         let available_profiles: HashMap<String, Vec<KeyedProject>> = data
             .projects
-            .profiles
             .into_iter()
             .map(|(profile_name, profile_map)| {
                 let keyed_projects: Vec<KeyedProject> = profile_map.into_iter().collect();
@@ -93,8 +79,7 @@ impl Config {
         let profile_count: usize = available_profiles.values().map(|v| v.len()).sum();
 
         info!(
-            "Successfully loaded config with {} base projects and {} profile projects across {} profiles",
-            default.len(),
+            "Successfully loaded config with {} profile projects across {} profiles",
             profile_count,
             available_profiles.len()
         );
@@ -106,7 +91,7 @@ impl Config {
             profiles: selected_profiles,
             dirs: data.search.dirs,
             vsc_dirs: data.search.vsc,
-            base: default,
+            base: Vec::new(), // No more base projects - all are in profiles
             available_profiles,
         })
     }
@@ -262,13 +247,11 @@ mod tests {
                 "default": {
                     "P0": "~/base"
                 },
-                "profiles": {
-                    "personal": {
-                        "P1": "~/personal"
-                    },
-                    "work": {
-                        "P2": "~/work"
-                    }
+                "personal": {
+                    "P1": "~/personal"
+                },
+                "work": {
+                    "P2": "~/work"
                 }
             }
         }"#,
@@ -279,11 +262,8 @@ mod tests {
             Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
         let projects = config.keyed_projects();
 
-        // When no profiles are specified, only base projects should be used
-        assert_eq!(projects.len(), 1);
-        assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
-        assert!(!projects.contains(&("P1".to_string(), "~/personal".to_string())));
-        assert!(!projects.contains(&("P2".to_string(), "~/work".to_string())));
+        // When no profiles are specified, no projects should be used (since base is now empty)
+        assert_eq!(projects.len(), 0);
     }
 
     #[test]
@@ -302,17 +282,15 @@ mod tests {
                 "default": {
                     "P0": "~/base"
                 },
-                "profiles": {
-                    "personal": {
-                        "P1": "~/personal"
-                    },
-                    "work": {
-                        "P2": "~/work",
-                        "P3": "~/work_specific"
-                    },
-                    "dev": {
-                        "P4": "~/dev"
-                    }
+                "personal": {
+                    "P1": "~/personal"
+                },
+                "work": {
+                    "P2": "~/work",
+                    "P3": "~/work_specific"
+                },
+                "dev": {
+                    "P4": "~/dev"
                 }
             }
         }"#,
@@ -327,12 +305,12 @@ mod tests {
         .unwrap();
         let projects = config.keyed_projects();
 
-        // Should have 3 projects: P0 (base), P2 (work), P3 (work_specific)
-        assert_eq!(projects.len(), 3);
-        assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
+        // Should have 2 projects: P2 (work), P3 (work_specific)
+        assert_eq!(projects.len(), 2);
         assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
         assert!(projects.contains(&("P3".to_string(), "~/work_specific".to_string())));
-        // Should NOT contain personal or dev profiles
+        // Should NOT contain default, personal or dev profiles
+        assert!(!projects.contains(&("P0".to_string(), "~/base".to_string())));
         assert!(!projects.contains(&("P1".to_string(), "~/personal".to_string())));
         assert!(!projects.contains(&("P4".to_string(), "~/dev".to_string())));
     }
@@ -353,13 +331,11 @@ mod tests {
                 "default": {
                     "P0": "~/base"
                 },
-                "profiles": {
-                    "personal": {
-                        "P1": "~/personal"
-                    },
-                    "work": {
-                        "P2": "~/work"
-                    }
+                "personal": {
+                    "P1": "~/personal"
+                },
+                "work": {
+                    "P2": "~/work"
                 }
             }
         }"#,
@@ -374,11 +350,12 @@ mod tests {
         .unwrap();
         let projects = config.keyed_projects();
 
-        // All profiles should be merged (base + personal + work)
-        assert_eq!(projects.len(), 3);
-        assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
+        // Only selected profiles should be merged (personal + work)
+        assert_eq!(projects.len(), 2);
         assert!(projects.contains(&("P1".to_string(), "~/personal".to_string())));
         assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
+        // Should NOT contain default
+        assert!(!projects.contains(&("P0".to_string(), "~/base".to_string())));
     }
 
     #[test]
@@ -398,29 +375,33 @@ mod tests {
                     "P0": "~/base",
                     "P1": "~/base_default"
                 },
-                "profiles": {
-                    "personal": {
-                        "P1": "~/personal_override"
-                    },
-                    "work": {
-                        "P1": "~/work_override",
-                        "P2": "~/work"
-                    }
+                "personal": {
+                    "P1": "~/personal_override"
+                },
+                "work": {
+                    "P1": "~/work_override",
+                    "P2": "~/work"
                 }
             }
         }"#,
             )
             .unwrap();
 
-        let config =
-            Config::load_from_path(Some(temp.path().join("test_config.json")), None).unwrap();
+        // Test with both personal and work profiles to see override behavior
+        let config = Config::load_from_path(
+            Some(temp.path().join("test_config.json")),
+            Some(vec!["personal".to_string(), "work".to_string()]),
+        )
+        .unwrap();
         let projects = config.keyed_projects();
 
-        // When no profiles are specified, only base projects should be used
+        // Should have personal and work projects, with work overriding personal for P1
         assert_eq!(projects.len(), 2);
-        assert!(projects.contains(&("P0".to_string(), "~/base".to_string())));
-        assert!(projects.contains(&("P1".to_string(), "~/base_default".to_string())));
-        assert!(!projects.contains(&("P2".to_string(), "~/work".to_string())));
+        assert!(projects.contains(&("P1".to_string(), "~/work_override".to_string())));
+        assert!(projects.contains(&("P2".to_string(), "~/work".to_string())));
+        // Should NOT contain default or personal version of P1
+        assert!(!projects.contains(&("P0".to_string(), "~/base".to_string())));
+        assert!(!projects.contains(&("P1".to_string(), "~/personal_override".to_string())));
     }
 
     #[test]
@@ -442,10 +423,8 @@ mod tests {
                 }},
                 "projects": {{
                     "default": {{}},
-                    "profiles": {{
-                        "personal": {{}},
-                        "work": {{}}
-                    }}
+                    "personal": {{}},
+                    "work": {{}}
                 }}
             }}"#,
                 temp.path().display()
@@ -503,10 +482,8 @@ mod tests {
             }},
             "projects": {{
                 "default": {{}},
-                "profiles": {{
-                    "personal": {{}},
-                    "work": {{}}
-                }}
+                "personal": {{}},
+                "work": {{}}
             }}
         }}"#,
             temp.path().display(),
@@ -562,10 +539,8 @@ mod tests {
             }},
             "projects": {{
                 "default": {{}},
-                "profiles": {{
-                    "personal": {{}},
-                    "work": {{}}
-                }}
+                "personal": {{}},
+                "work": {{}}
             }}
         }}"#,
             temp.path().display(),
@@ -622,10 +597,8 @@ mod tests {
             }},
             "projects": {{
                 "default": {{}},
-                "profiles": {{
-                    "personal": {{}},
-                    "work": {{}}
-                }}
+                "personal": {{}},
+                "work": {{}}
             }}
         }}"#,
             temp.path().display(),
@@ -680,10 +653,8 @@ mod tests {
             }},
             "projects": {{
                 "default": {{}},
-                "profiles": {{
-                    "personal": {{}},
-                    "work": {{}}
-                }}
+                "personal": {{}},
+                "work": {{}}
             }}
         }}"#,
             temp.path().display()
@@ -727,10 +698,8 @@ mod tests {
             }},
             "projects": {{
                 "default": {{}},
-                "profiles": {{
-                    "personal": {{}},
-                    "work": {{}}
-                }}
+                "personal": {{}},
+                "work": {{}}
             }}
         }}"#,
             temp.path().display(),

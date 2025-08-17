@@ -1,0 +1,111 @@
+# KSM Config v1.0
+# Profile inheritance allows shared settings with machine-specific overrides
+
+# at the top level we have "global" which is unique
+[global]
+version = "1.0" # Config version for migrations
+
+# after that we have our optional 'default' 'profile' structure containing:
+# - search
+# - projects
+# - keys
+
+[search]
+dirs = ["~/dotfiles"]
+# recursively search through ~/dev for all `.git` based projects and flatten this list into `dirs`
+vsc = ["~/dev"]
+
+[projects]
+dots = "~/dotfiles"
+qmk = "~/dev/projects/qmk_firmware/keyboards/preonic/keymaps/codethread"
+
+[keys]
+# Keys exist for the ksm keys command to make kitty keybindings machine
+# agnostic e.g you always bind leader+1 to invoke `ksm key P1` but the chosen
+# project can be machine specific
+# the value referes to a `project` previously defined
+P1 = "dots"
+P2 = "qmk"
+
+###
+
+# For users with multiple machines, they may wish to then extend these futher.
+# The previously defined 'default' profile is optional, but if specified it is always applied
+
+# To create custom profiles, we use the structure `profiles.<name>`, after which
+# the profile structure is repeated:
+
+[profiles.personal.search]
+# globs will be expanded and flattened
+dirs = ["~/.local/share/nvim/lazy/*"]
+# default profile is implicitly extended so the `search.vsc` field will be inherited here
+
+[profiles.personal.projects]
+nvim_plugin = "~/dev/projects/ct.nvim"
+pomo = "~/dev/projects/pomo"
+
+[profiles.personal.keys]
+P3 = "nvim_plugin"
+P4 = "pomo"
+# default keys are implicitly extended here so we will have P1,P2,P3 & P4 defined
+
+[profiles.work]
+# this will cause all arrays in work to extend personal arrays
+# all objects will be merged, with keys from work taking precedence
+# IMPORTANT if a 'default' profile is defined, it is extended automatically first
+# so now our work profile config will be extended as
+# default -> personal -> work
+extends = 'personal'
+
+[profiles.work.search]
+# these will now be appended to personal.dirs,
+# i.e the final result will be akin to [...search.dirs, ...profiles.personal.search.dirs, ...profiles.work.search.dirs]
+dirs = ["~/workfiles"]
+
+[profiles.work.projects]
+frontend = "~/work/app/deals-light-ui"
+
+# projects can be specified as a table with extra details
+# `path` is the only required field
+[profiles.work.projects.backend]
+path = "~/work/app/go_be"
+description = "current backend project"
+
+[profiles.work.keys]
+# due to the `extends` property above, P1 and P3 will be used from 'personal', but P2 and P4 will be overridden
+P2 = "frontend"
+P4 = "backend"
+
+[profiles.remote]
+# Minimal profile for remote/SSH sessions
+# do not extend the default profile
+extends = false
+
+[profiles.remote.search]
+# Only search in limited locations
+dirs = ["~/workspace/**"]
+max_depth = 2  # Shallower search for performance, limits globbing
+exclude = ["node_modules", "target", ".git"]
+
+# ============================================================================
+# PROFILE SELECTION RULES
+# ============================================================================
+[auto_profile]
+# Rules for automatic profile selection
+# Evaluated in order, first match wins
+
+[[auto_profile.rules]]
+hostname_regex = "^work-.*"
+profile = "work"
+
+[[auto_profile.rules]]
+env = { PERSONAL_ENVIRONMENT = "true" }
+profile = "work"
+
+[[auto_profile.rules]]
+ssh_session = true
+profile = "remote"
+
+[[auto_profile.rules]]
+default = true
+profile = "personal"

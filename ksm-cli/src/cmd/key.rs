@@ -110,11 +110,9 @@ mod tests {
             "cmd": []
         },
         "projects": {
-            "*": {},
-            "profiles": {
-                "personal": {},
-                "work": {}
-            }
+            "default": {},
+            "personal": {},
+            "work": {}
         }
     }"#;
 
