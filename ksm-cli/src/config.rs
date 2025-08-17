@@ -1,92 +1,16 @@
+mod auto_profile;
+mod discovery;
+mod types;
+
+use types::*;
+pub use types::{KeyedProject, ProjectDefinition};
+
 use anyhow::Result;
-use glob::glob;
 use log::{debug, error, info};
-use regex::Regex;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-
-pub type KeyedProject = (String, String);
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum ProjectDefinition {
-    Simple(String),
-    Detailed {
-        path: String,
-        description: Option<String>,
-    },
-}
-
-impl ProjectDefinition {
-    pub fn path(&self) -> &str {
-        match self {
-            ProjectDefinition::Simple(path) => path,
-            ProjectDefinition::Detailed { path, .. } => path,
-        }
-    }
-
-    pub fn description(&self) -> Option<&str> {
-        match self {
-            ProjectDefinition::Simple(_) => None,
-            ProjectDefinition::Detailed { description, .. } => description.as_deref(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct SessionConfigData {
-    global: Option<GlobalConfig>,
-    search: Option<SearchConfig>,
-    projects: Option<HashMap<String, ProjectDefinition>>,
-    keys: Option<HashMap<String, String>>,
-    profiles: Option<HashMap<String, ProfileConfig>>,
-    auto_profile: Option<AutoProfileConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GlobalConfig {
-    version: String,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct ProfileConfig {
-    extends: Option<ProfileExtends>,
-    search: Option<SearchConfig>,
-    projects: Option<HashMap<String, ProjectDefinition>>,
-    keys: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
-enum ProfileExtends {
-    Single(String),
-    Disabled(bool), // for extends = false
-}
-
-#[derive(Debug, Deserialize)]
-struct AutoProfileConfig {
-    rules: Vec<AutoProfileRule>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct AutoProfileRule {
-    hostname_regex: Option<String>,
-    env: Option<HashMap<String, String>>,
-    ssh_session: Option<bool>,
-    default: Option<bool>,
-    profile: String,
-}
-
-#[derive(Debug, Deserialize, Clone, Default)]
-struct SearchConfig {
-    dirs: Option<Vec<String>>,
-    vsc: Option<Vec<String>>,
-    max_depth: Option<u32>,
-    exclude: Option<Vec<String>>,
-}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -152,7 +76,7 @@ impl Config {
             manual_profiles
         } else {
             // Use auto-selection rules
-            if let Some(auto_profile) = Self::select_auto_profile(&auto_profile_rules)? {
+            if let Some(auto_profile) = auto_profile::select_auto_profile(&auto_profile_rules)? {
                 vec![auto_profile]
             } else {
                 vec![]
@@ -199,53 +123,6 @@ impl Config {
                     .map(|project_def| (key, project_def.path().to_string()))
             })
             .collect()
-    }
-
-    fn select_auto_profile(auto_profile_rules: &[AutoProfileRule]) -> Result<Option<String>> {
-        for rule in auto_profile_rules {
-            if Self::rule_matches(rule)? {
-                return Ok(Some(rule.profile.clone()));
-            }
-        }
-        Ok(None)
-    }
-
-    fn rule_matches(rule: &AutoProfileRule) -> Result<bool> {
-        // Check hostname regex
-        if let Some(ref hostname_regex) = rule.hostname_regex {
-            if let Ok(hostname) = hostname::get() {
-                let regex = Regex::new(hostname_regex)?;
-                if regex.is_match(&hostname.to_string_lossy()) {
-                    return Ok(true);
-                }
-            }
-        }
-
-        // Check environment variables
-        if let Some(ref env_vars) = rule.env {
-            for (key, expected_value) in env_vars {
-                if let Ok(actual_value) = env::var(key) {
-                    if &actual_value == expected_value {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-
-        // Check SSH session
-        if let Some(ssh_session) = rule.ssh_session {
-            let is_ssh = env::var("SSH_CLIENT").is_ok() || env::var("SSH_TTY").is_ok();
-            if ssh_session == is_ssh {
-                return Ok(true);
-            }
-        }
-
-        // Check default rule
-        if rule.default.unwrap_or(false) {
-            return Ok(true);
-        }
-
-        Ok(false)
     }
 
     fn resolved_search(&self) -> SearchConfig {
@@ -375,136 +252,6 @@ impl Config {
         // Reverse to get correct order (base -> ... -> target)
         chain.reverse();
         chain
-    }
-
-    pub fn expanded_directories(&self) -> Result<Vec<String>> {
-        let mut expanded_dirs = Vec::new();
-        let resolved_search = self.resolved_search();
-
-        let dirs = resolved_search.dirs.unwrap_or_default();
-        for dir_pattern in &dirs {
-            let expanded_path = shellexpand::tilde(dir_pattern);
-
-            // Check if the pattern contains glob characters
-            if dir_pattern.contains('*') || dir_pattern.contains('?') || dir_pattern.contains('[') {
-                // Handle as glob pattern
-                match glob(&expanded_path) {
-                    Ok(paths) => {
-                        for entry in paths {
-                            match entry {
-                                Ok(path) => {
-                                    if path.is_dir() {
-                                        if let Some(path_str) = path.to_str() {
-                                            expanded_dirs.push(path_str.to_string());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Error reading glob path: {}", e);
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Invalid glob pattern '{}': {}", dir_pattern, e);
-                    }
-                }
-            } else {
-                // Handle as literal path - add it regardless of whether it exists
-                expanded_dirs.push(expanded_path.to_string());
-            }
-        }
-
-        // Add discovered git projects
-        if let Ok(git_projects) = self.discover_git_projects() {
-            expanded_dirs.extend(git_projects);
-        }
-
-        Ok(expanded_dirs)
-    }
-
-    fn discover_git_projects(&self) -> Result<Vec<String>> {
-        let mut git_projects = Vec::new();
-        let resolved_search = self.resolved_search();
-        let vsc_dirs = resolved_search.vsc.clone().unwrap_or_default();
-
-        for vsc_dir_pattern in &vsc_dirs {
-            let expanded_path = shellexpand::tilde(vsc_dir_pattern);
-            let vsc_path = PathBuf::from(expanded_path.as_ref());
-
-            if vsc_path.exists() && vsc_path.is_dir() {
-                self.find_git_projects_recursive(&vsc_path, &mut git_projects, &resolved_search)?;
-            }
-        }
-
-        Ok(git_projects)
-    }
-
-    fn find_git_projects_recursive(
-        &self,
-        dir: &PathBuf,
-        git_projects: &mut Vec<String>,
-        search_config: &SearchConfig,
-    ) -> Result<()> {
-        Self::find_git_projects_recursive_helper(dir, git_projects, search_config, 0)
-    }
-
-    fn find_git_projects_recursive_helper(
-        dir: &PathBuf,
-        git_projects: &mut Vec<String>,
-        search_config: &SearchConfig,
-        current_depth: u32,
-    ) -> Result<()> {
-        // Check max_depth limit
-        if let Some(max_depth) = search_config.max_depth {
-            if current_depth >= max_depth {
-                return Ok(());
-            }
-        }
-
-        let git_dir = dir.join(".git");
-
-        if git_dir.exists() {
-            if let Some(dir_str) = dir.to_str() {
-                git_projects.push(dir_str.to_string());
-            }
-            return Ok(());
-        }
-
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    if let Some(dir_name) = path.file_name() {
-                        let dir_name_str = dir_name.to_string_lossy();
-
-                        // Skip hidden directories
-                        if dir_name_str.starts_with('.') {
-                            continue;
-                        }
-
-                        // Check exclude patterns
-                        if let Some(ref exclude_patterns) = search_config.exclude {
-                            if exclude_patterns
-                                .iter()
-                                .any(|pattern| dir_name_str.contains(pattern))
-                            {
-                                continue;
-                            }
-                        }
-
-                        Self::find_git_projects_recursive_helper(
-                            &path,
-                            git_projects,
-                            search_config,
-                            current_depth + 1,
-                        )?;
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 

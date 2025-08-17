@@ -37,8 +37,8 @@ fn get_projects(app: &App) -> Result<Vec<String>> {
     let directories = app.config.expanded_directories()?;
     let mut all_projects = Vec::new();
 
-    for dir in directories {
-        let expanded_dir = expand_tilde(&dir);
+    for dir in &directories {
+        let expanded_dir = expand_tilde(dir);
         debug!("Using directory as project: {}", expanded_dir);
 
         if let Ok(path) = fs::canonicalize(&expanded_dir) {
