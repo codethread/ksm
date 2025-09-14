@@ -27,6 +27,29 @@ qmk = "~/dev/projects/qmk_firmware/keyboards/preonic/keymaps/codethread"
 P1 = "dots"
 P2 = "qmk"
 
+[session]
+# Session behavior configuration
+
+# Navigation settings for session tabs
+[session.navigation]
+# Whether to wrap around when navigating tabs (default: true)
+# When false, navigation stops at first/last tab
+wrap_tabs = true
+
+# Keybinding configuration for session commands
+[session.keybindings]
+next_tab = "ctrl+shift+right"
+prev_tab = "ctrl+shift+left"
+new_tab = "ctrl+shift+t"
+close_all_session_tabs = "ctrl+shift+w"
+
+# Default behavior for unnamed sessions
+[session.unnamed_session]
+# Whether to treat regular tabs as session tabs when no explicit session is active
+treat_as_session = false
+# Whether to enable session navigation commands when no explicit session is active
+enable_navigation = true
+
 ###
 
 # For users with multiple machines, they may wish to then extend these futher.
@@ -75,6 +98,17 @@ description = "current backend project"
 # due to the `extends` property above, P1 and P3 will be used from 'personal', but P2 and P4 will be overridden
 P2 = "frontend"
 P4 = "backend"
+
+[profiles.work.session]
+# Work profile session configuration
+[profiles.work.session.navigation]
+# Disable wrapping for work sessions for more predictable navigation
+wrap_tabs = false
+
+[profiles.work.session.keybindings]
+# Use different keybindings for work profile
+next_tab = "cmd+shift+]"
+prev_tab = "cmd+shift+["
 
 [profiles.remote]
 # Minimal profile for remote/SSH sessions

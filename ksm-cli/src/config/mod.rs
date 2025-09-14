@@ -20,6 +20,7 @@ pub struct Config {
     base_search: SearchConfig,
     base_projects: HashMap<String, ProjectDefinition>,
     base_keys: HashMap<String, String>,
+    base_session: SessionBehaviorConfig,
     profiles: HashMap<String, ProfileConfig>,
     #[allow(dead_code)]
     auto_profile_rules: Vec<AutoProfileRule>,
@@ -67,6 +68,7 @@ impl Config {
         let base_search = data.search.unwrap_or_default();
         let base_projects = data.projects.unwrap_or_default();
         let base_keys = data.keys.unwrap_or_default();
+        let base_session = data.session.unwrap_or_default();
         let profiles = data.profiles.unwrap_or_default();
         let auto_profile_rules = data.auto_profile.map(|ap| ap.rules).unwrap_or_default();
 
@@ -105,6 +107,7 @@ impl Config {
             base_search,
             base_projects,
             base_keys,
+            base_session,
             profiles,
             auto_profile_rules,
             selected_profiles,
@@ -207,6 +210,99 @@ impl Config {
         }
 
         result
+    }
+
+    fn resolved_session(&self) -> SessionBehaviorConfig {
+        let mut result = self.base_session.clone();
+
+        for profile_name in &self.selected_profiles {
+            if self.profiles.contains_key(profile_name) {
+                let profile_chain = self.build_profile_chain(profile_name);
+
+                for chain_profile_name in profile_chain {
+                    if let Some(chain_profile) = self.profiles.get(&chain_profile_name) {
+                        if let Some(ref session) = chain_profile.session {
+                            // Merge navigation config
+                            if let Some(ref profile_navigation) = session.navigation {
+                                let base_navigation = result
+                                    .navigation
+                                    .get_or_insert_with(NavigationConfig::default);
+                                if profile_navigation.wrap_tabs.is_some() {
+                                    base_navigation.wrap_tabs = profile_navigation.wrap_tabs;
+                                }
+                            }
+
+                            // Merge keybindings config
+                            if let Some(ref profile_keybindings) = session.keybindings {
+                                let base_keybindings = result
+                                    .keybindings
+                                    .get_or_insert_with(KeybindingConfig::default);
+                                if profile_keybindings.next_tab.is_some() {
+                                    base_keybindings.next_tab =
+                                        profile_keybindings.next_tab.clone();
+                                }
+                                if profile_keybindings.prev_tab.is_some() {
+                                    base_keybindings.prev_tab =
+                                        profile_keybindings.prev_tab.clone();
+                                }
+                                if profile_keybindings.new_tab.is_some() {
+                                    base_keybindings.new_tab = profile_keybindings.new_tab.clone();
+                                }
+                                if profile_keybindings.close_all_session_tabs.is_some() {
+                                    base_keybindings.close_all_session_tabs =
+                                        profile_keybindings.close_all_session_tabs.clone();
+                                }
+                            }
+
+                            // Merge unnamed session config
+                            if let Some(ref profile_unnamed) = session.unnamed_session {
+                                let base_unnamed = result
+                                    .unnamed_session
+                                    .get_or_insert_with(UnnamedSessionConfig::default);
+                                if profile_unnamed.treat_as_session.is_some() {
+                                    base_unnamed.treat_as_session =
+                                        profile_unnamed.treat_as_session;
+                                }
+                                if profile_unnamed.enable_navigation.is_some() {
+                                    base_unnamed.enable_navigation =
+                                        profile_unnamed.enable_navigation;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Get the resolved session configuration with profile inheritance applied
+    pub fn session_config(&self) -> SessionBehaviorConfig {
+        self.resolved_session()
+    }
+
+    /// Get whether tab navigation should wrap around by default
+    pub fn default_wrap_tabs(&self) -> bool {
+        self.resolved_session()
+            .navigation
+            .as_ref()
+            .and_then(|n| n.wrap_tabs)
+            .unwrap_or(true) // Default to true for backward compatibility
+    }
+
+    /// Get the keybindings configuration
+    pub fn keybindings(&self) -> Option<KeybindingConfig> {
+        self.resolved_session().keybindings
+    }
+
+    /// Get the unnamed session configuration
+    pub fn unnamed_session_config(&self) -> UnnamedSessionConfig {
+        self.resolved_session()
+            .unnamed_session
+            .as_ref()
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn build_profile_chain(&self, profile_name: &str) -> Vec<String> {

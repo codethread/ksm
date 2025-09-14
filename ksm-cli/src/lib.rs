@@ -3,6 +3,7 @@ pub mod cli;
 pub mod cmd;
 pub mod config;
 pub mod kitty;
+pub mod session;
 pub mod utils;
 
 // Re-export commonly used types and functions

@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+use kitty_lib::CommandExecutor;
 use log::{debug, error, info};
 use std::path::Path;
 
@@ -6,12 +7,12 @@ use crate::app::App;
 use crate::config::KeyedProject;
 use crate::utils::expand_tilde;
 
-pub fn cmd_key(app: &App, key: &str, print_path: bool) -> Result<()> {
+pub fn cmd_key<E: CommandExecutor>(app: &App<E>, key: &str, print_path: bool) -> Result<()> {
     let keyed_projects = get_keyed_projects(app);
     cmd_key_with_projects(app, key, print_path, &keyed_projects)
 }
 
-pub fn cmd_keys(app: &App) -> Result<()> {
+pub fn cmd_keys<E: CommandExecutor>(app: &App<E>) -> Result<()> {
     let keyed_projects = get_keyed_projects(app);
 
     if keyed_projects.is_empty() {
@@ -26,12 +27,12 @@ pub fn cmd_keys(app: &App) -> Result<()> {
     Ok(())
 }
 
-fn get_keyed_projects(app: &App) -> Vec<KeyedProject> {
+fn get_keyed_projects<E: CommandExecutor>(app: &App<E>) -> Vec<KeyedProject> {
     app.config.keyed_projects()
 }
 
-fn cmd_key_with_projects(
-    app: &App,
+fn cmd_key_with_projects<E: CommandExecutor>(
+    app: &App<E>,
     key: &str,
     print_path: bool,
     keyed_projects: &[KeyedProject],

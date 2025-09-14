@@ -1,10 +1,13 @@
 use anyhow::Result;
 use log::{debug, error};
+use std::env;
 use std::process::Command;
 
+use crate::commands::close_tab::KittenCloseTabCommand;
 use crate::commands::focus_tab::KittenFocusTabCommand;
 use crate::commands::launch::KittenLaunchCommand;
 use crate::commands::ls::KittenLsCommand;
+use crate::commands::navigate_tab::{KittenNavigateTabCommand, TabNavigationDirection};
 use crate::executor::CommandExecutor;
 use crate::types::{KittyCommandResult, KittyLaunchResponse, KittyLsResponse};
 use crate::utils::get_kitty_socket;
@@ -80,6 +83,28 @@ impl CommandExecutor for KittyExecutor {
         }
     }
 
+    fn close_tab(&self, command: KittenCloseTabCommand) -> Result<KittyCommandResult<()>> {
+        let socket_arg = format!("--to={}", self.socket);
+        let match_arg = format!("--match=id:{}", command.tab_id);
+        let args = ["@", &socket_arg, "close-tab", &match_arg];
+
+        debug!(
+            "Running kitten @ --to={} close-tab --match=id:{}",
+            self.socket, command.tab_id
+        );
+
+        let status = Command::new("kitten").args(args).status()?;
+
+        if status.success() {
+            Ok(KittyCommandResult::success_empty())
+        } else {
+            Ok(KittyCommandResult::error(format!(
+                "Failed to close tab {}",
+                command.tab_id
+            )))
+        }
+    }
+
     fn launch(
         &self,
         command: KittenLaunchCommand,
@@ -95,7 +120,29 @@ impl CommandExecutor for KittyExecutor {
         }
 
         let env_formatted;
-        if let Some(env) = &command.env {
+        let mut effective_env = command.env.clone();
+
+        // Handle session inheritance
+        if command.inherit_session {
+            if let Ok(session_project) = env::var("KITTY_SESSION_PROJECT") {
+                if !session_project.is_empty() {
+                    // Check if env is already set, if not add the session
+                    if effective_env.is_none() {
+                        effective_env = Some(format!("KITTY_SESSION_PROJECT={}", session_project));
+                    } else if let Some(ref current_env) = effective_env {
+                        // If env is set but doesn't contain session, append it
+                        if !current_env.contains("KITTY_SESSION_PROJECT=") {
+                            effective_env = Some(format!(
+                                "{},KITTY_SESSION_PROJECT={}",
+                                current_env, session_project
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(env) = &effective_env {
             env_formatted = format!("--env={}", env);
             args.push(&env_formatted);
         }
@@ -106,7 +153,7 @@ impl CommandExecutor for KittyExecutor {
         }
 
         debug!(
-            "Running kitten @ --to={} launch --type={} {}{}{}",
+            "Running kitten @ --to={} launch --type={} {}{}{}{}",
             self.socket,
             command.launch_type,
             command
@@ -114,16 +161,20 @@ impl CommandExecutor for KittyExecutor {
                 .as_ref()
                 .map(|c| format!("--cwd={} ", c))
                 .unwrap_or_default(),
-            command
-                .env
+            effective_env
                 .as_ref()
                 .map(|e| format!("--env={} ", e))
                 .unwrap_or_default(),
             command
                 .tab_title
                 .as_ref()
-                .map(|t| format!("--tab-title={}", t))
-                .unwrap_or_default()
+                .map(|t| format!("--tab-title={} ", t))
+                .unwrap_or_default(),
+            if command.inherit_session {
+                "(inherit_session)"
+            } else {
+                ""
+            }
         );
 
         let status = Command::new("kitten").args(&args).status()?;
@@ -138,5 +189,105 @@ impl CommandExecutor for KittyExecutor {
         } else {
             Ok(KittyCommandResult::error("Failed to launch tab"))
         }
+    }
+
+    fn navigate_tab(&self, command: KittenNavigateTabCommand) -> Result<KittyCommandResult<()>> {
+        let session_name = command.session_name.as_deref().unwrap_or("unnamed");
+
+        // First, get all tabs in the session
+        let ls_command = if session_name != "unnamed" {
+            KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", session_name)
+        } else {
+            KittenLsCommand::new()
+        };
+
+        let os_windows = self.ls(ls_command)?;
+        let mut session_tabs = Vec::new();
+
+        // Collect all tabs from the session
+        for os_window in os_windows {
+            for tab in os_window.tabs {
+                // For unnamed session, include tabs without session env var
+                if session_name == "unnamed" {
+                    let has_session_env = tab
+                        .windows
+                        .iter()
+                        .any(|w| w.env.contains_key("KITTY_SESSION_PROJECT"));
+                    if !has_session_env {
+                        session_tabs.push(tab);
+                    }
+                } else {
+                    // For named sessions, include tabs with matching env var
+                    let matches_session = tab.windows.iter().any(|w| {
+                        w.env
+                            .get("KITTY_SESSION_PROJECT")
+                            .is_some_and(|v| v == session_name)
+                    });
+                    if matches_session {
+                        session_tabs.push(tab);
+                    }
+                }
+            }
+        }
+
+        if session_tabs.is_empty() {
+            return Ok(KittyCommandResult::error(format!(
+                "No tabs found in session '{}'",
+                session_name
+            )));
+        }
+
+        if session_tabs.len() == 1 {
+            // Only one tab, nothing to navigate to
+            return Ok(KittyCommandResult::success_empty());
+        }
+
+        // Sort tabs by ID to maintain consistent order
+        session_tabs.sort_by_key(|t| t.id);
+
+        // Find the currently active tab
+        let current_active = session_tabs
+            .iter()
+            .position(|t| t.state.as_ref().is_some_and(|s| s == "active"));
+
+        let current_index = current_active.unwrap_or(0);
+
+        // Calculate next index based on direction
+        let next_index = match command.direction {
+            TabNavigationDirection::Next => {
+                if current_index + 1 >= session_tabs.len() {
+                    if command.allow_wrap { 0 } else { current_index }
+                } else {
+                    current_index + 1
+                }
+            }
+            TabNavigationDirection::Previous => {
+                if current_index == 0 {
+                    if command.allow_wrap {
+                        session_tabs.len() - 1
+                    } else {
+                        0
+                    }
+                } else {
+                    current_index - 1
+                }
+            }
+        };
+
+        // If no change needed due to no-wrap
+        if next_index == current_index {
+            return Ok(KittyCommandResult::success_empty());
+        }
+
+        let target_tab_id = session_tabs[next_index].id;
+
+        debug!(
+            "Navigating {:?} in session '{}' from tab {} to tab {}",
+            command.direction, session_name, session_tabs[current_index].id, target_tab_id
+        );
+
+        // Focus the target tab
+        let focus_command = KittenFocusTabCommand::new(target_tab_id);
+        self.focus_tab(focus_command)
     }
 }

@@ -59,6 +59,10 @@ pub fn format_project_for_selection(name: &str, path: &str) -> String {
     format!("{} ({})", name, path)
 }
 
+pub fn format_session_tab_title(project_name: &str) -> String {
+    format!("📁 {}", project_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +150,15 @@ mod tests {
         let result = parse_project_selection(input).unwrap();
         assert_eq!(result.0, "project   with   spaces");
         assert_eq!(result.1, "/path/with/spaces");
+    }
+
+    #[test]
+    fn test_format_session_tab_title() {
+        assert_eq!(format_session_tab_title("my-project"), "📁 my-project");
+        assert_eq!(
+            format_session_tab_title("project with spaces"),
+            "📁 project with spaces"
+        );
+        assert_eq!(format_session_tab_title(""), "📁 ");
     }
 }

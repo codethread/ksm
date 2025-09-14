@@ -1,11 +1,12 @@
 use anyhow::Result;
+use kitty_lib::CommandExecutor;
 use log::{debug, info, warn};
 use std::fs;
 
 use crate::app::App;
 use crate::utils::expand_tilde;
 
-pub fn cmd_list(app: &App) -> Result<()> {
+pub fn cmd_list<E: CommandExecutor>(app: &App<E>) -> Result<()> {
     info!("Listing all available sessions");
 
     let projects = get_projects(app)?;
@@ -33,7 +34,7 @@ pub fn cmd_list(app: &App) -> Result<()> {
     Ok(())
 }
 
-fn get_projects(app: &App) -> Result<Vec<String>> {
+fn get_projects<E: CommandExecutor>(app: &App<E>) -> Result<Vec<String>> {
     let directories = app.config.expanded_directories()?;
     let mut all_projects = Vec::new();
 

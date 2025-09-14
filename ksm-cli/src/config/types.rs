@@ -48,6 +48,8 @@ pub struct SessionConfigData {
     pub projects: Option<HashMap<String, ProjectDefinition>>,
     /// Default key bindings mapping keys to project names (inherited by profiles)
     pub keys: Option<HashMap<String, String>>,
+    /// Session behavior configuration (inherited by profiles)
+    pub session: Option<SessionBehaviorConfig>,
     /// Named profiles that can extend default or other profiles
     pub profiles: Option<HashMap<String, ProfileConfig>>,
     /// Rules for automatic profile selection based on environment
@@ -74,6 +76,8 @@ pub struct ProfileConfig {
     pub projects: Option<HashMap<String, ProjectDefinition>>,
     /// Key bindings for this profile (keys reference project names)
     pub keys: Option<HashMap<String, String>>,
+    /// Session behavior configuration for this profile
+    pub session: Option<SessionBehaviorConfig>,
 }
 
 /// Profile extension configuration
@@ -119,4 +123,44 @@ pub struct SearchConfig {
     pub max_depth: Option<u32>,
     /// Patterns to exclude from search (e.g., "node_modules", "target", ".git")
     pub exclude: Option<Vec<String>>,
+}
+
+/// Session behavior configuration
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct SessionBehaviorConfig {
+    /// Default navigation behavior for session tabs
+    pub navigation: Option<NavigationConfig>,
+    /// Keybinding configuration for session commands
+    pub keybindings: Option<KeybindingConfig>,
+    /// Default behavior for unnamed sessions
+    pub unnamed_session: Option<UnnamedSessionConfig>,
+}
+
+/// Navigation configuration for session tabs
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct NavigationConfig {
+    /// Whether to wrap around when navigating tabs (default: true)
+    pub wrap_tabs: Option<bool>,
+}
+
+/// Keybinding configuration for session commands
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct KeybindingConfig {
+    /// Keybinding for next-tab command
+    pub next_tab: Option<String>,
+    /// Keybinding for prev-tab command  
+    pub prev_tab: Option<String>,
+    /// Keybinding for new-tab command
+    pub new_tab: Option<String>,
+    /// Keybinding for close-all-session-tabs command
+    pub close_all_session_tabs: Option<String>,
+}
+
+/// Configuration for default unnamed session behavior
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct UnnamedSessionConfig {
+    /// Whether to treat regular tabs as session tabs when no explicit session is active
+    pub treat_as_session: Option<bool>,
+    /// Whether to enable session navigation commands when no explicit session is active
+    pub enable_navigation: Option<bool>,
 }

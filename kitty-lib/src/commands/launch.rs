@@ -4,6 +4,7 @@ pub struct KittenLaunchCommand {
     pub cwd: Option<String>,
     pub env: Option<String>,
     pub tab_title: Option<String>,
+    pub inherit_session: bool,
 }
 
 impl Default for KittenLaunchCommand {
@@ -19,6 +20,7 @@ impl KittenLaunchCommand {
             cwd: None,
             env: None,
             tab_title: None,
+            inherit_session: false,
         }
     }
 
@@ -39,6 +41,12 @@ impl KittenLaunchCommand {
 
     pub fn tab_title(mut self, title: &str) -> Self {
         self.tab_title = Some(title.to_string());
+        self
+    }
+
+    /// Enable automatic session inheritance from the current environment
+    pub fn inherit_current_session(mut self) -> Self {
+        self.inherit_session = true;
         self
     }
 }

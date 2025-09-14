@@ -29,12 +29,12 @@ check-lib:
 [group('validate')]
 [group('project-wide')]
 test:
-    cargo test --workspace
+    cargo test --workspace -- --test-threads=1
 
 # Run CLI tests only
 [group('validate')]
 test-cli:
-    cargo test --package ksm
+    cargo test --package ksm -- --test-threads=1
 
 # Run library tests only
 [group('validate')]

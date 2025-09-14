@@ -11,7 +11,8 @@ The main CLI application for the Kitty Session Manager. This package provides th
 - **`cli.rs`**: Command-line interface definitions using clap
 - **`config.rs`**: Configuration file loading and session management
 - **`kitty.rs`**: High-level Kitty terminal integration wrapper
-- **`cmd/<name>.rs`**: individual cli commands
+- **`cmd/<name>.rs`**: Individual CLI commands (key, list, select, next-tab, prev-tab)
+- **`session.rs`**: Session context detection and last-active tab tracking
 
 ### Testing
 

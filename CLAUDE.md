@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Running the CLI:**
 
 - Use `cargo run --package ksm` instead of building and running the binary directly
-- Examples: `cargo run --package ksm -- key --help`, `cargo run --package ksm -- list`
+- Examples: `cargo run --package ksm -- key --help`, `cargo run --package ksm -- list`, `cargo run --package ksm -- next-tab`
 - Or use justfile commands: `just help`, `just list`, `just key <keyname>`
 
 **Development checks:**
@@ -32,7 +32,8 @@ This is a Rust workspace with two main packages:
 
 - Entry point: `src/main.rs`
 - Core modules: `app.rs`, `cli.rs`, `config.rs`, `kitty.rs`
-- Commands: `src/cmd/` (key.rs, list.rs, select.rs)
+- Commands: `src/cmd/` (key.rs, list.rs, select.rs, next_tab.rs, prev_tab.rs)
+- Session management: `src/session.rs` (session context detection and last-active tab tracking)
 - Uses clap for CLI parsing, skim for fuzzy selection
 
 **kitty-lib** (`kitty-lib/`): Library for Kitty terminal integration
@@ -40,7 +41,7 @@ This is a Rust workspace with two main packages:
 - `CommandExecutor` trait in `src/executor/` for abstracting Kitty kitten commands
 - `KittyExecutor`: Production implementation that calls actual kitten commands
 - `MockExecutor`: Test implementation with call tracking and configurable responses
-- Command structs in `src/commands/`: `KittenLsCommand`, `KittenFocusTabCommand`, `KittenLaunchCommand`
+- Command structs in `src/commands/`: `KittenLsCommand`, `KittenFocusTabCommand`, `KittenLaunchCommand`, `KittenNavigateTabCommand`
 - Shared types and utilities in `src/types.rs` and `src/utils.rs`
 
 **Key architectural patterns:**
@@ -55,4 +56,3 @@ This is a Rust workspace with two main packages:
 - Unit tests use `MockExecutor` to simulate Kitty interactions
 - Integration tests in `/tests/` directory
 - CLI tests verify argument parsing and command routing
-

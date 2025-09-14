@@ -5,7 +5,10 @@ use std::path::PathBuf;
 
 use ksm::app::App;
 use ksm::cli::{Cli, Commands};
-use ksm::cmd::{cmd_key, cmd_keys, cmd_list, cmd_select};
+use ksm::cmd::{
+    cmd_close_all_session_tabs, cmd_key, cmd_keys, cmd_list, cmd_new_tab, cmd_next_tab,
+    cmd_prev_tab, cmd_select,
+};
 use ksm::config::Config;
 
 #[cfg(not(tarpaulin_include))]
@@ -45,6 +48,31 @@ fn main() -> Result<()> {
         Some(Commands::Select) => {
             info!("Interactive project selection");
             cmd_select(&app)
+        }
+        Some(Commands::NextTab { no_wrap }) => {
+            info!("Navigating to next tab in session");
+            let no_wrap_option = if no_wrap { Some(true) } else { None };
+            cmd_next_tab(&app, no_wrap_option)?;
+            Ok(())
+        }
+        Some(Commands::PrevTab { no_wrap }) => {
+            info!("Navigating to previous tab in session");
+            let no_wrap_option = if no_wrap { Some(true) } else { None };
+            cmd_prev_tab(&app, no_wrap_option)?;
+            Ok(())
+        }
+        Some(Commands::NewTab { cwd, title }) => {
+            info!("Creating new tab with session inheritance");
+            cmd_new_tab(&app, cwd.as_deref(), title.as_deref())?;
+            Ok(())
+        }
+        Some(Commands::CloseAllSessionTabs { session, force }) => {
+            info!(
+                "Closing all tabs in session{}",
+                if force { " (forced)" } else { "" }
+            );
+            cmd_close_all_session_tabs(&app, session.as_deref(), force)?;
+            Ok(())
         }
         None => {
             info!("No command specified, listing sessions");
