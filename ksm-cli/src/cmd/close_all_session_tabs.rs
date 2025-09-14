@@ -43,7 +43,7 @@ where
     info!("Querying tabs for session '{}'", target_session);
 
     // Query all tabs in the target session
-    let ls_command = KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", &target_session);
+    let ls_command = KittenLsCommand::new().match_tab_env("KITTY_SESSION_PROJECT", &target_session);
     let os_windows = app.kitty.ls(ls_command)?;
 
     // Collect all tabs from the session

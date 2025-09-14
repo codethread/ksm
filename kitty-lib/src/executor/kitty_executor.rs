@@ -36,11 +36,16 @@ impl CommandExecutor for KittyExecutor {
 
         let match_formatted;
         if let Some(match_arg) = &command.match_arg {
-            match_formatted = format!("--match={}", match_arg);
+            let match_flag = if command.use_tab_match {
+                "--match-tab"
+            } else {
+                "--match"
+            };
+            match_formatted = format!("{}={}", match_flag, match_arg);
             args.push(&match_formatted);
             debug!(
-                "Running kitten @ --to={} ls --match={}",
-                self.socket, match_arg
+                "Running kitten @ --to={} ls {}={}",
+                self.socket, match_flag, match_arg
             );
         } else {
             debug!("Running kitten @ --to={} ls", self.socket);
@@ -196,7 +201,7 @@ impl CommandExecutor for KittyExecutor {
 
         // First, get all tabs in the session
         let ls_command = if session_name != "unnamed" {
-            KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", session_name)
+            KittenLsCommand::new().match_tab_env("KITTY_SESSION_PROJECT", session_name)
         } else {
             KittenLsCommand::new()
         };
@@ -205,25 +210,21 @@ impl CommandExecutor for KittyExecutor {
         let mut session_tabs = Vec::new();
 
         // Collect all tabs from the session
-        for os_window in os_windows {
-            for tab in os_window.tabs {
-                // For unnamed session, include tabs without session env var
-                if session_name == "unnamed" {
+        // When using --match-tab, kitty already filters for us
+        if session_name != "unnamed" {
+            // For named sessions, kitty already filtered with --match-tab
+            for os_window in os_windows {
+                session_tabs.extend(os_window.tabs);
+            }
+        } else {
+            // For unnamed session, we need to manually filter out tabs with session env var
+            for os_window in os_windows {
+                for tab in os_window.tabs {
                     let has_session_env = tab
                         .windows
                         .iter()
                         .any(|w| w.env.contains_key("KITTY_SESSION_PROJECT"));
                     if !has_session_env {
-                        session_tabs.push(tab);
-                    }
-                } else {
-                    // For named sessions, include tabs with matching env var
-                    let matches_session = tab.windows.iter().any(|w| {
-                        w.env
-                            .get("KITTY_SESSION_PROJECT")
-                            .is_some_and(|v| v == session_name)
-                    });
-                    if matches_session {
                         session_tabs.push(tab);
                     }
                 }

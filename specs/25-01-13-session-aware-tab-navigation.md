@@ -154,3 +154,42 @@ Enable users to create and navigate tabs within Kitty sessions with session-awar
 
 - None created - implementation successfully extends existing patterns without breaking changes
 - All new features integrate seamlessly with existing codebase architecture
+
+## Post-Implementation Issues & Fixes
+
+### Regression Found (2025-01-14)
+
+**Issue**: The `prev-tab` and `next-tab` commands were failing with "No tabs found in session" error even when tabs existed in the session.
+
+**Root Cause**: The implementation was using `--match=env:KITTY_SESSION_PROJECT=<session>` instead of `--match-tab env:KITTY_SESSION_PROJECT=<session>` in the `kitty @ ls` command. The `--match` flag filters windows that have the environment variable, while `--match-tab` filters tabs containing windows with that environment variable. Additionally, after using `--match-tab`, the code was redundantly filtering the already-filtered results.
+
+**Fix Applied**:
+
+1. Added `use_tab_match` field to `KittenLsCommand` to specify whether to use `--match` or `--match-tab`
+2. Created `match_tab_env()` method for tab-level filtering operations
+3. Updated `KittyExecutor::navigate_tab()` to use `--match-tab` for session filtering
+4. Removed redundant filtering logic since `--match-tab` already returns the correct tabs
+5. Updated all session tab operations to use `match_tab_env()` instead of `match_env()`
+
+### Prevention Strategies for Future Planning
+
+1. **Explicit API Documentation**: When planning features that interact with external tools (like Kitty), document the exact API calls and flags that will be used. In this case, explicitly stating "use `--match-tab` for tab filtering" would have prevented the issue.
+
+2. **Integration Test Requirements**: Specify integration tests that exercise the actual Kitty commands, not just mock responses. This would have caught the `--match` vs `--match-tab` discrepancy early.
+
+3. **Command Output Validation**: Include sample command outputs in the spec to validate assumptions. For example:
+
+   ```bash
+   # Expected command and output structure
+   kitty @ ls --match-tab env:KITTY_SESSION_PROJECT=myproject
+   # Returns: OS windows containing tabs that have the environment variable
+   ```
+
+4. **Edge Case Enumeration**: Explicitly list edge cases in the spec with their expected behavior:
+   - Single tab in session → navigation should be no-op
+   - Multiple tabs in session → should cycle correctly
+   - No tabs matching session → should return appropriate error
+
+5. **API Abstraction Layer Design**: Consider designing a clear abstraction between the business logic and external tool APIs. The `KittenLsCommand` abstraction was good, but it should have been more explicit about its filtering behavior from the start.
+
+6. **Mock Behavior Alignment**: Ensure mock implementations closely mirror actual tool behavior. The `MockExecutor` should validate that the correct match type is being used for the intended operation.

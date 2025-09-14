@@ -34,7 +34,8 @@ impl<E: CommandExecutor> Kitty<E> {
     pub fn match_session_tab(&self, project_name: &str) -> Result<Option<KittyTab>> {
         debug!("Matching session tab for project: {}", project_name);
 
-        let ls_command = KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", project_name);
+        let ls_command =
+            KittenLsCommand::new().match_tab_env("KITTY_SESSION_PROJECT", project_name);
         let os_windows = self.kitty.ls(ls_command)?;
 
         if os_windows.is_empty() {
@@ -278,8 +279,8 @@ impl<E: CommandExecutor> Kitty<E> {
     /// Get all tabs for a specific session
     pub fn get_session_tabs(&self, session_context: &SessionContext) -> Result<Vec<KittyTab>> {
         if session_context.is_explicit {
-            let ls_command =
-                KittenLsCommand::new().match_env("KITTY_SESSION_PROJECT", session_context.name());
+            let ls_command = KittenLsCommand::new()
+                .match_tab_env("KITTY_SESSION_PROJECT", session_context.name());
             let os_windows = self.kitty.ls(ls_command)?;
 
             let mut session_tabs = Vec::new();
