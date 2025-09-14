@@ -49,8 +49,8 @@ pub fn cmd_new_tab<E: CommandExecutor>(
 mod tests {
     use super::*;
     use anyhow::Result;
-    use assert_fs::prelude::*;
     use assert_fs::TempDir;
+    use assert_fs::prelude::*;
     use kitty_lib::MockExecutor;
     use std::env;
 
@@ -266,7 +266,7 @@ vsc = []
         let launch_calls = mock_executor.get_launch_calls();
         assert_eq!(launch_calls.len(), 1);
         assert_eq!(launch_calls[0].cwd, None); // Should use current directory
-                                               // Check what actually gets set based on environment detection
+        // Check what actually gets set based on environment detection
         let detected_session = env::var("KITTY_SESSION_PROJECT").ok();
         let expected_title = detected_session.map(|s| format!("📁 {}", s));
         assert_eq!(launch_calls[0].tab_title, expected_title); // Title based on detected session
