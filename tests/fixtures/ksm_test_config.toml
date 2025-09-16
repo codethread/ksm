@@ -1,0 +1,36 @@
+# KSM Test Configuration
+# Simplified configuration for integration testing
+
+[global]
+version = "1.0"
+
+[search]
+dirs = ["/tmp/test-projects"]
+vsc = []
+
+[projects]
+test_project_a = "/tmp/test-projects/project-a"
+test_project_b = "/tmp/test-projects/project-b"
+test_project_c = "/tmp/test-projects/project-c"
+
+[keys]
+P1 = "test_project_a"
+P2 = "test_project_b"
+P3 = "test_project_c"
+
+[session]
+# Session behavior configuration for testing
+
+[session.navigation]
+# Enable wrapping for testing both wrap and no-wrap scenarios
+wrap_tabs = true
+
+[session.keybindings]
+next_tab = "ctrl+shift+]"
+prev_tab = "ctrl+shift+["
+new_tab = "ctrl+shift+t"
+close_all_session_tabs = "ctrl+shift+w"
+
+[session.unnamed_session]
+treat_as_session = false
+enable_navigation = true

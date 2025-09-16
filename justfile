@@ -41,6 +41,26 @@ test-cli:
 test-lib:
     cargo test --package kitty-lib
 
+# Run integration tests with Kitty
+[group('validate')]
+test-integration:
+    cargo test --package kitty-lib --test integration_test -- --nocapture
+
+# Run integration tests with verbose output for debugging
+[group('validate')]
+test-integration-debug:
+    RUST_LOG=debug cargo test --package kitty-lib --test integration_test -- --nocapture
+
+# Run a specific integration test
+[group('validate')]
+test-integration-single TEST_NAME:
+    cargo test --package kitty-lib --test integration_test {{TEST_NAME}} -- --nocapture
+
+# Test if Kitty harness can launch (for debugging launch issues)
+[group('validate')]
+test-harness:
+    cargo test --package kitty-lib --test integration_test test_harness_lifecycle -- --nocapture
+
 # Clean build artifacts for entire workspace
 clean:
     cargo clean
