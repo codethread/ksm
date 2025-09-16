@@ -1,4 +1,5 @@
 use anyhow::Result;
+use kitty_lib::commands::set_tab_title::KittenSetTabTitleCommand;
 use kitty_lib::{
     CommandExecutor, KittenCloseTabCommand, KittenFocusTabCommand, KittenLaunchCommand,
     KittenLsCommand, KittenNavigateTabCommand, KittyExecutor, KittyTab, TabNavigationDirection,
@@ -34,9 +35,26 @@ impl<E: CommandExecutor> Kitty<E> {
     pub fn match_session_tab(&self, project_name: &str) -> Result<Option<KittyTab>> {
         debug!("Matching session tab for project: {}", project_name);
 
-        let ls_command =
+        // First try matching by tab title with session: prefix
+        let session_title_pattern = format!("session:{}", project_name);
+        let ls_command_title = KittenLsCommand::new().match_tab_title(&session_title_pattern);
+
+        if let Ok(os_windows) = self.kitty.ls(ls_command_title) {
+            for os_window in os_windows {
+                if let Some(tab) = os_window.tabs.into_iter().next() {
+                    info!(
+                        "Found existing session tab for project '{}' with id: {} using tab title matching",
+                        project_name, tab.id
+                    );
+                    return Ok(Some(tab));
+                }
+            }
+        }
+
+        // Fall back to environment variable matching for backward compatibility
+        let ls_command_env =
             KittenLsCommand::new().match_tab_env("KITTY_SESSION_PROJECT", project_name);
-        let os_windows = self.kitty.ls(ls_command)?;
+        let os_windows = self.kitty.ls(ls_command_env)?;
 
         if os_windows.is_empty() {
             debug!("No matching session found for project: {}", project_name);
@@ -46,7 +64,7 @@ impl<E: CommandExecutor> Kitty<E> {
         for os_window in os_windows {
             if let Some(tab) = os_window.tabs.into_iter().next() {
                 info!(
-                    "Found existing session tab for project '{}' with id: {}",
+                    "Found existing session tab for project '{}' with id: {} using environment variable matching",
                     project_name, tab.id
                 );
                 return Ok(Some(tab));
@@ -279,18 +297,38 @@ impl<E: CommandExecutor> Kitty<E> {
     /// Get all tabs for a specific session
     pub fn get_session_tabs(&self, session_context: &SessionContext) -> Result<Vec<KittyTab>> {
         if session_context.is_explicit {
-            let ls_command = KittenLsCommand::new()
-                .match_tab_env("KITTY_SESSION_PROJECT", session_context.name());
-            let os_windows = self.kitty.ls(ls_command)?;
-
             let mut session_tabs = Vec::new();
-            for os_window in os_windows {
-                session_tabs.extend(os_window.tabs);
+
+            // First try tab title matching
+            let session_title_pattern = format!("session:{}", session_context.name());
+            let ls_command_title = KittenLsCommand::new().match_tab_title(&session_title_pattern);
+
+            if let Ok(os_windows) = self.kitty.ls(ls_command_title) {
+                for os_window in os_windows {
+                    session_tabs.extend(os_window.tabs);
+                }
             }
 
+            // Also include tabs matched by environment variable for backward compatibility
+            let ls_command_env = KittenLsCommand::new()
+                .match_tab_env("KITTY_SESSION_PROJECT", session_context.name());
+
+            if let Ok(os_windows) = self.kitty.ls(ls_command_env) {
+                for os_window in os_windows {
+                    for tab in os_window.tabs {
+                        // Only add if not already included (check by ID)
+                        if !session_tabs.iter().any(|existing| existing.id == tab.id) {
+                            session_tabs.push(tab);
+                        }
+                    }
+                }
+            }
+
+            // Sort by ID to maintain consistent ordering
+            session_tabs.sort_by_key(|t| t.id);
             Ok(session_tabs)
         } else {
-            // For unnamed session, get all tabs and filter out those with session env vars
+            // For unnamed session, get all tabs and filter out those with session env vars or tab titles
             let ls_command = KittenLsCommand::new();
             let os_windows = self.kitty.ls(ls_command)?;
 
@@ -301,7 +339,9 @@ impl<E: CommandExecutor> Kitty<E> {
                         .windows
                         .iter()
                         .any(|w| w.env.contains_key("KITTY_SESSION_PROJECT"));
-                    if !has_session_env {
+                    let has_session_title = tab.title.starts_with("session:");
+
+                    if !has_session_env && !has_session_title {
                         unnamed_tabs.push(tab);
                     }
                 }
@@ -311,13 +351,19 @@ impl<E: CommandExecutor> Kitty<E> {
         }
     }
 
-    /// Check if there are any session tabs (tabs with KITTY_SESSION_PROJECT set)
+    /// Check if there are any session tabs (tabs with KITTY_SESSION_PROJECT set or session: title)
     pub fn has_session_tabs(&self) -> Result<bool> {
         let ls_command = KittenLsCommand::new();
         let os_windows = self.kitty.ls(ls_command)?;
 
         for os_window in os_windows {
             for tab in os_window.tabs {
+                // Check tab title first
+                if tab.title.starts_with("session:") {
+                    return Ok(true);
+                }
+
+                // Check environment variables for backward compatibility
                 for window in tab.windows {
                     if window.env.contains_key("KITTY_SESSION_PROJECT") {
                         return Ok(true);
@@ -385,12 +431,26 @@ impl<E: CommandExecutor> Kitty<E> {
         for os_window in os_windows {
             for tab in os_window.tabs {
                 if tab.id == tab_id {
-                    // Check if this tab has a session context
+                    // Check tab title first for session: prefix
+                    if tab.title.starts_with("session:") {
+                        if let Some(session_name) =
+                            crate::session::SessionContext::parse_session_from_title(&tab.title)
+                        {
+                            SessionUtils::set_last_active_tab(&session_name, tab_id);
+                            debug!(
+                                "Updated last active tab tracking: session '{}' -> tab {} (from tab title)",
+                                session_name, tab_id
+                            );
+                            return Ok(());
+                        }
+                    }
+
+                    // Fall back to checking environment variables
                     for window in &tab.windows {
                         if let Some(session_name) = window.env.get("KITTY_SESSION_PROJECT") {
                             SessionUtils::set_last_active_tab(session_name, tab_id);
                             debug!(
-                                "Updated last active tab tracking: session '{}' -> tab {}",
+                                "Updated last active tab tracking: session '{}' -> tab {} (from environment)",
                                 session_name, tab_id
                             );
                             return Ok(());
@@ -419,13 +479,28 @@ impl<E: CommandExecutor> Kitty<E> {
         for os_window in os_windows {
             for tab in os_window.tabs {
                 let mut has_session = false;
-                for window in &tab.windows {
-                    if let Some(session_name) = window.env.get("KITTY_SESSION_PROJECT") {
-                        *session_counts.entry(session_name.clone()).or_insert(0) += 1;
+
+                // Check tab title first for session: prefix
+                if tab.title.starts_with("session:") {
+                    if let Some(session_name) =
+                        crate::session::SessionContext::parse_session_from_title(&tab.title)
+                    {
+                        *session_counts.entry(session_name).or_insert(0) += 1;
                         has_session = true;
-                        break;
                     }
                 }
+
+                // Fall back to environment variable for backward compatibility
+                if !has_session {
+                    for window in &tab.windows {
+                        if let Some(session_name) = window.env.get("KITTY_SESSION_PROJECT") {
+                            *session_counts.entry(session_name.clone()).or_insert(0) += 1;
+                            has_session = true;
+                            break;
+                        }
+                    }
+                }
+
                 if !has_session {
                     unnamed_count += 1;
                 }
@@ -525,6 +600,24 @@ impl<E: CommandExecutor> Kitty<E> {
 
         Ok(result)
     }
+
+    /// Set the title of the current tab
+    pub fn set_tab_title(&self, title: &str) -> Result<()> {
+        info!("Setting tab title to: '{}'", title);
+        let command = KittenSetTabTitleCommand::new(title);
+        let result = self.kitty.set_tab_title(command)?;
+
+        if !result.is_success() {
+            let error_msg = result
+                .error_message
+                .unwrap_or_else(|| "Unknown error".to_string());
+            error!("Failed to set tab title: {}", error_msg);
+            return Err(anyhow::anyhow!("Failed to set tab title: {}", error_msg));
+        }
+
+        info!("Successfully set tab title");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -557,6 +650,8 @@ mod tests {
                 num: Some(0),
                 recent: Some(0),
             }],
+            is_active: false,
+            is_focused: false,
             state: Some("active".to_string()),
             recent: Some(0),
         };
@@ -609,8 +704,8 @@ mod tests {
         let result = kitty.match_session_tab("nonexistent-project")?;
         assert!(result.is_none());
 
-        // Verify call was made
-        assert_eq!(mock_executor.ls_call_count(), 1);
+        // Verify calls were made (now makes 2 calls: tab title match + env var match)
+        assert_eq!(mock_executor.ls_call_count(), 2);
 
         Ok(())
     }
@@ -645,7 +740,7 @@ mod tests {
         );
         assert_eq!(
             launch_calls[0].tab_title,
-            Some("📁 test-project".to_string())
+            Some("session:test-project".to_string())
         );
 
         Ok(())

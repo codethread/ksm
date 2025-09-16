@@ -36,13 +36,6 @@ P2 = "qmk"
 # When false, navigation stops at first/last tab
 wrap_tabs = true
 
-# Keybinding configuration for session commands
-[session.keybindings]
-next_tab = "ctrl+shift+right"
-prev_tab = "ctrl+shift+left"
-new_tab = "ctrl+shift+t"
-close_all_session_tabs = "ctrl+shift+w"
-
 # Default behavior for unnamed sessions
 [session.unnamed_session]
 # Whether to treat regular tabs as session tabs when no explicit session is active
@@ -104,11 +97,6 @@ P4 = "backend"
 [profiles.work.session.navigation]
 # Disable wrapping for work sessions for more predictable navigation
 wrap_tabs = false
-
-[profiles.work.session.keybindings]
-# Use different keybindings for work profile
-next_tab = "cmd+shift+]"
-prev_tab = "cmd+shift+["
 
 [profiles.remote]
 # Minimal profile for remote/SSH sessions

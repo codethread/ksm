@@ -8,6 +8,7 @@ use crate::commands::focus_tab::KittenFocusTabCommand;
 use crate::commands::launch::KittenLaunchCommand;
 use crate::commands::ls::KittenLsCommand;
 use crate::commands::navigate_tab::{KittenNavigateTabCommand, TabNavigationDirection};
+use crate::commands::set_tab_title::KittenSetTabTitleCommand;
 use crate::executor::CommandExecutor;
 use crate::types::{KittyCommandResult, KittyLaunchResponse, KittyLsResponse};
 use crate::utils::get_kitty_socket;
@@ -199,37 +200,55 @@ impl CommandExecutor for KittyExecutor {
     fn navigate_tab(&self, command: KittenNavigateTabCommand) -> Result<KittyCommandResult<()>> {
         let session_name = command.session_name.as_deref().unwrap_or("unnamed");
 
-        // First, get all tabs in the session
-        let ls_command = if session_name != "unnamed" {
-            KittenLsCommand::new().match_tab_env("KITTY_SESSION_PROJECT", session_name)
-        } else {
-            KittenLsCommand::new()
-        };
-
-        let os_windows = self.ls(ls_command)?;
+        // Get all tabs for the session
         let mut session_tabs = Vec::new();
 
-        // Collect all tabs from the session
-        // When using --match-tab, kitty already filters for us
         if session_name != "unnamed" {
-            // For named sessions, kitty already filtered with --match-tab
-            for os_window in os_windows {
-                session_tabs.extend(os_window.tabs);
+            // First try tab title matching for named sessions
+            let session_title_pattern = format!("session:{}", session_name);
+            let ls_command_title = KittenLsCommand::new().match_tab_title(&session_title_pattern);
+
+            if let Ok(os_windows) = self.ls(ls_command_title) {
+                for os_window in os_windows {
+                    session_tabs.extend(os_window.tabs);
+                }
+            }
+
+            // Also include tabs matched by environment variable for backward compatibility
+            let ls_command_env =
+                KittenLsCommand::new().match_tab_env("KITTY_SESSION_PROJECT", session_name);
+
+            if let Ok(os_windows) = self.ls(ls_command_env) {
+                for os_window in os_windows {
+                    for tab in os_window.tabs {
+                        // Only add if not already included (check by ID)
+                        if !session_tabs.iter().any(|existing| existing.id == tab.id) {
+                            session_tabs.push(tab);
+                        }
+                    }
+                }
             }
         } else {
-            // For unnamed session, we need to manually filter out tabs with session env var
+            // For unnamed session, get all tabs and filter out those with session env var or session title
+            let ls_command = KittenLsCommand::new();
+            let os_windows = self.ls(ls_command)?;
+
             for os_window in os_windows {
                 for tab in os_window.tabs {
                     let has_session_env = tab
                         .windows
                         .iter()
                         .any(|w| w.env.contains_key("KITTY_SESSION_PROJECT"));
-                    if !has_session_env {
+                    let has_session_title = tab.title.starts_with("session:");
+                    if !has_session_env && !has_session_title {
                         session_tabs.push(tab);
                     }
                 }
             }
         }
+
+        // Sort tabs by ID to maintain consistent order
+        session_tabs.sort_by_key(|t| t.id);
 
         if session_tabs.is_empty() {
             return Ok(KittyCommandResult::error(format!(
@@ -247,9 +266,7 @@ impl CommandExecutor for KittyExecutor {
         session_tabs.sort_by_key(|t| t.id);
 
         // Find the currently active tab
-        let current_active = session_tabs
-            .iter()
-            .position(|t| t.state.as_ref().is_some_and(|s| s == "active"));
+        let current_active = session_tabs.iter().position(|t| t.is_active);
 
         let current_index = current_active.unwrap_or(0);
 
@@ -290,5 +307,35 @@ impl CommandExecutor for KittyExecutor {
         // Focus the target tab
         let focus_command = KittenFocusTabCommand::new(target_tab_id);
         self.focus_tab(focus_command)
+    }
+
+    fn set_tab_title(&self, command: KittenSetTabTitleCommand) -> Result<KittyCommandResult<()>> {
+        let socket_arg = format!("--to={}", self.socket);
+        let mut args = vec!["@", &socket_arg, "set-tab-title"];
+
+        let match_formatted;
+        if let Some(match_pattern) = &command.match_pattern {
+            match_formatted = format!("--match={}", match_pattern);
+            args.push(&match_formatted);
+            debug!(
+                "Running kitten @ --to={} set-tab-title --match={} '{}'",
+                self.socket, match_pattern, command.title
+            );
+        } else {
+            debug!(
+                "Running kitten @ --to={} set-tab-title '{}'",
+                self.socket, command.title
+            );
+        }
+
+        args.push(&command.title);
+
+        let status = Command::new("kitten").args(args).status()?;
+
+        if status.success() {
+            Ok(KittyCommandResult::success_empty())
+        } else {
+            Ok(KittyCommandResult::error("Failed to set tab title"))
+        }
     }
 }

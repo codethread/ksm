@@ -154,8 +154,8 @@ vsc = []
         // Should have generated a session-based title (either my-project or the current env var)
         if let Some(title) = actual_title {
             assert!(
-                title.starts_with("📁 "),
-                "Expected title to start with folder emoji, got: {}",
+                title.starts_with("session:"),
+                "Expected title to start with session prefix, got: {}",
                 title
             );
         } else {
@@ -268,7 +268,7 @@ vsc = []
         assert_eq!(launch_calls[0].cwd, None); // Should use current directory
         // Check what actually gets set based on environment detection
         let detected_session = env::var("KITTY_SESSION_PROJECT").ok();
-        let expected_title = detected_session.map(|s| format!("📁 {}", s));
+        let expected_title = detected_session.map(|s| format!("session:{}", s));
         assert_eq!(launch_calls[0].tab_title, expected_title); // Title based on detected session
         assert!(launch_calls[0].inherit_session); // Still uses inherit flag
 

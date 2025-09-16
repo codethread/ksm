@@ -1305,11 +1305,6 @@ impl TestEnvironment {
         // Add session configuration
         config_content.push_str("[session]\n\n");
         config_content.push_str("[session.navigation]\nwrap_tabs = true\n\n");
-        config_content.push_str("[session.keybindings]\n");
-        config_content.push_str("next_tab = \"ctrl+shift+]\"\n");
-        config_content.push_str("prev_tab = \"ctrl+shift+[\"\n");
-        config_content.push_str("new_tab = \"ctrl+shift+t\"\n");
-        config_content.push_str("close_all_session_tabs = \"ctrl+shift+w\"\n\n");
         config_content.push_str("[session.unnamed_session]\n");
         config_content.push_str("treat_as_session = false\n");
         config_content.push_str("enable_navigation = true\n");

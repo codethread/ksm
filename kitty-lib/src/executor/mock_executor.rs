@@ -7,6 +7,7 @@ use crate::commands::focus_tab::KittenFocusTabCommand;
 use crate::commands::launch::KittenLaunchCommand;
 use crate::commands::ls::KittenLsCommand;
 use crate::commands::navigate_tab::{KittenNavigateTabCommand, TabNavigationDirection};
+use crate::commands::set_tab_title::KittenSetTabTitleCommand;
 use crate::executor::CommandExecutor;
 use crate::types::{
     KittyCommandResult, KittyLaunchResponse, KittyLsResponse, KittyOsWindow, KittyTab, KittyWindow,
@@ -65,6 +66,8 @@ impl MockLayout {
             index: Some(0),
             title: tab_title.unwrap_or_else(|| format!("Tab {}", tab_id)),
             windows: vec![window],
+            is_active: false, // Will be set later by set_active_tab
+            is_focused: false,
             state: Some("active".to_string()),
             recent: Some(0),
         };
@@ -87,7 +90,7 @@ impl MockLayout {
 
         // Set as active if it's the first tab
         if self.active_tab_id.is_none() {
-            self.active_tab_id = Some(tab_id);
+            self.set_active_tab(tab_id);
         }
 
         tab_id
@@ -122,6 +125,8 @@ impl MockLayout {
             index: Some(0),
             title: tab_title.unwrap_or_else(|| format!("Unnamed Tab {}", tab_id)),
             windows: vec![window],
+            is_active: false, // Will be set later by set_active_tab
+            is_focused: false,
             state: Some("active".to_string()),
             recent: Some(0),
         };
@@ -144,7 +149,7 @@ impl MockLayout {
 
         // Set as active if it's the first tab
         if self.active_tab_id.is_none() {
-            self.active_tab_id = Some(tab_id);
+            self.set_active_tab(tab_id);
         }
 
         tab_id
@@ -152,30 +157,53 @@ impl MockLayout {
 
     /// Set the active tab
     pub fn set_active_tab(&mut self, tab_id: u32) -> bool {
-        // Check if the tab exists
-        for os_window in &self.os_windows {
-            for tab in &os_window.tabs {
+        // Check if the tab exists and update is_active flags
+        let mut found = false;
+        for os_window in &mut self.os_windows {
+            for tab in &mut os_window.tabs {
                 if tab.id == tab_id {
-                    self.active_tab_id = Some(tab_id);
-                    return true;
+                    tab.is_active = true;
+                    tab.is_focused = true;
+                    found = true;
+                } else {
+                    tab.is_active = false;
+                    tab.is_focused = false;
                 }
             }
         }
-        false
+
+        if found {
+            self.active_tab_id = Some(tab_id);
+        }
+        found
     }
 
-    /// Get tabs filtered by session (environment variable)
+    /// Get tabs filtered by session (environment variable or tab title)
     pub fn get_tabs_for_session(&self, session_name: &str) -> Vec<KittyTab> {
         let mut matching_tabs = Vec::new();
 
         for os_window in &self.os_windows {
             for tab in &os_window.tabs {
-                // Check if any window in the tab has the matching session environment variable
-                for window in &tab.windows {
-                    if let Some(env_session) = window.env.get("KITTY_SESSION_PROJECT") {
-                        if env_session == session_name {
+                let mut tab_matches = false;
+
+                // Check tab title first for session: prefix
+                if tab.title.starts_with("session:") {
+                    if let Some(title_session) = self.parse_session_from_title(&tab.title) {
+                        if title_session == session_name {
                             matching_tabs.push(tab.clone());
-                            break; // Found matching window in this tab, move to next tab
+                            tab_matches = true;
+                        }
+                    }
+                }
+
+                // Also check environment variable for backward compatibility
+                if !tab_matches {
+                    for window in &tab.windows {
+                        if let Some(env_session) = window.env.get("KITTY_SESSION_PROJECT") {
+                            if env_session == session_name {
+                                matching_tabs.push(tab.clone());
+                                break; // Found matching window in this tab, move to next tab
+                            }
                         }
                     }
                 }
@@ -185,6 +213,22 @@ impl MockLayout {
         // Sort by tab ID to maintain consistent ordering
         matching_tabs.sort_by_key(|tab| tab.id);
         matching_tabs
+    }
+
+    /// Parses a session name from a tab title with the format "session:<name>[ - description]"
+    fn parse_session_from_title(&self, title: &str) -> Option<String> {
+        if let Some(after_prefix) = title.strip_prefix("session:") {
+            // Split on " - " to handle optional description
+            let session_name = after_prefix.split(" - ").next()?;
+
+            if !session_name.is_empty() {
+                Some(session_name.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     /// Get all tabs in the current layout
@@ -204,7 +248,27 @@ impl MockLayout {
         direction: TabNavigationDirection,
         allow_wrap: bool,
     ) -> Option<u32> {
-        let session_tabs = self.get_tabs_for_session(session_name);
+        let session_tabs = if session_name == "unnamed" {
+            // For unnamed session, get tabs without session env var or session title
+            let mut unnamed_tabs = Vec::new();
+            for os_window in &self.os_windows {
+                for tab in &os_window.tabs {
+                    let has_session_env = tab
+                        .windows
+                        .iter()
+                        .any(|w| w.env.contains_key("KITTY_SESSION_PROJECT"));
+                    let has_session_title = tab.title.starts_with("session:");
+                    if !has_session_env && !has_session_title {
+                        unnamed_tabs.push(tab.clone());
+                    }
+                }
+            }
+            unnamed_tabs.sort_by_key(|t| t.id);
+            unnamed_tabs
+        } else {
+            self.get_tabs_for_session(session_name)
+        };
+
         if session_tabs.is_empty() {
             return None;
         }
@@ -282,6 +346,28 @@ impl MockLayout {
         self.next_window_id = 1;
         self.next_os_window_id = 1;
     }
+
+    /// Set the title of a tab by ID
+    pub fn set_tab_title(&mut self, tab_id: u32, title: &str) -> bool {
+        for os_window in &mut self.os_windows {
+            for tab in &mut os_window.tabs {
+                if tab.id == tab_id {
+                    tab.title = title.to_string();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Set the title of the currently active tab
+    pub fn set_active_tab_title(&mut self, title: &str) -> bool {
+        if let Some(active_id) = self.active_tab_id {
+            self.set_tab_title(active_id, title)
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for MockLayout {
@@ -297,11 +383,13 @@ pub struct MockExecutor {
     pub close_tab_calls: RefCell<Vec<KittenCloseTabCommand>>,
     pub launch_calls: RefCell<Vec<KittenLaunchCommand>>,
     pub navigate_tab_calls: RefCell<Vec<KittenNavigateTabCommand>>,
+    pub set_tab_title_calls: RefCell<Vec<KittenSetTabTitleCommand>>,
     pub ls_responses: RefCell<Vec<Result<KittyLsResponse>>>,
     pub focus_tab_responses: RefCell<Vec<Result<KittyCommandResult<()>>>>,
     pub close_tab_responses: RefCell<Vec<Result<KittyCommandResult<()>>>>,
     pub launch_responses: RefCell<Vec<Result<KittyCommandResult<KittyLaunchResponse>>>>,
     pub navigate_tab_responses: RefCell<Vec<Result<KittyCommandResult<()>>>>,
+    pub set_tab_title_responses: RefCell<Vec<Result<KittyCommandResult<()>>>>,
     pub layout: RefCell<MockLayout>,
 }
 
@@ -313,11 +401,13 @@ impl MockExecutor {
             close_tab_calls: RefCell::new(Vec::new()),
             launch_calls: RefCell::new(Vec::new()),
             navigate_tab_calls: RefCell::new(Vec::new()),
+            set_tab_title_calls: RefCell::new(Vec::new()),
             ls_responses: RefCell::new(Vec::new()),
             focus_tab_responses: RefCell::new(Vec::new()),
             close_tab_responses: RefCell::new(Vec::new()),
             launch_responses: RefCell::new(Vec::new()),
             navigate_tab_responses: RefCell::new(Vec::new()),
+            set_tab_title_responses: RefCell::new(Vec::new()),
             layout: RefCell::new(MockLayout::new()),
         }
     }
@@ -349,6 +439,10 @@ impl MockExecutor {
         self.navigate_tab_responses.borrow_mut().push(response);
     }
 
+    pub fn expect_set_tab_title_response(&self, response: Result<KittyCommandResult<()>>) {
+        self.set_tab_title_responses.borrow_mut().push(response);
+    }
+
     pub fn ls_call_count(&self) -> usize {
         self.ls_calls.borrow().len()
     }
@@ -369,6 +463,10 @@ impl MockExecutor {
         self.navigate_tab_calls.borrow().len()
     }
 
+    pub fn set_tab_title_call_count(&self) -> usize {
+        self.set_tab_title_calls.borrow().len()
+    }
+
     pub fn get_ls_calls(&self) -> Vec<KittenLsCommand> {
         self.ls_calls.borrow().clone()
     }
@@ -387,6 +485,10 @@ impl MockExecutor {
 
     pub fn get_navigate_tab_calls(&self) -> Vec<KittenNavigateTabCommand> {
         self.navigate_tab_calls.borrow().clone()
+    }
+
+    pub fn get_set_tab_title_calls(&self) -> Vec<KittenSetTabTitleCommand> {
+        self.set_tab_title_calls.borrow().clone()
     }
 
     /// Layout management methods
@@ -436,6 +538,14 @@ impl MockExecutor {
             .navigate_tab(session_name, direction, allow_wrap)
     }
 
+    pub fn set_tab_title_by_id(&self, tab_id: u32, title: &str) -> bool {
+        self.layout.borrow_mut().set_tab_title(tab_id, title)
+    }
+
+    pub fn set_active_tab_title(&self, title: &str) -> bool {
+        self.layout.borrow_mut().set_active_tab_title(title)
+    }
+
     /// Enable smart behavior where the MockExecutor uses its internal layout
     /// to generate responses automatically when no explicit responses are queued
     pub fn enable_smart_responses(&self) {
@@ -457,11 +567,34 @@ impl CommandExecutor for &MockExecutor {
         let layout = self.layout.borrow();
         let mut result_os_windows = Vec::new();
 
-        // Check if we need to filter by environment variable
+        // Check if we need to filter by environment variable or tab title
         if let Some(match_arg) = &command.match_arg {
             if match_arg.starts_with("env:KITTY_SESSION_PROJECT=") {
                 let session_name = match_arg.trim_start_matches("env:KITTY_SESSION_PROJECT=");
                 let matching_tabs = layout.get_tabs_for_session(session_name);
+
+                if !matching_tabs.is_empty() {
+                    // Create OS window containing the matching tabs
+                    let os_window = KittyOsWindow {
+                        id: 1,
+                        tabs: matching_tabs,
+                        title: Some("Kitty".to_string()),
+                        state: Some("active".to_string()),
+                    };
+                    result_os_windows.push(os_window);
+                }
+            } else if match_arg.starts_with("title:") {
+                let title_pattern = match_arg.trim_start_matches("title:");
+                let mut matching_tabs = Vec::new();
+
+                // Find tabs matching the title pattern
+                for os_window in &layout.os_windows {
+                    for tab in &os_window.tabs {
+                        if tab.title.contains(title_pattern) {
+                            matching_tabs.push(tab.clone());
+                        }
+                    }
+                }
 
                 if !matching_tabs.is_empty() {
                     // Create OS window containing the matching tabs
@@ -581,6 +714,39 @@ impl CommandExecutor for &MockExecutor {
                 "No tabs found in session '{}' for navigation",
                 session_name
             ))),
+        }
+    }
+
+    fn set_tab_title(&self, command: KittenSetTabTitleCommand) -> Result<KittyCommandResult<()>> {
+        self.set_tab_title_calls.borrow_mut().push(command.clone());
+
+        // If there's a queued response, use it
+        if let Some(response) = self.set_tab_title_responses.borrow_mut().pop() {
+            return response;
+        }
+
+        // Smart response: check if the tab exists and update its title in our layout
+        let success = if let Some(match_pattern) = &command.match_pattern {
+            if match_pattern.starts_with("id:") {
+                let tab_id_str = match_pattern.trim_start_matches("id:");
+                if let Ok(tab_id) = tab_id_str.parse::<u32>() {
+                    self.set_tab_title_by_id(tab_id, &command.title)
+                } else {
+                    false
+                }
+            } else {
+                // For other match patterns, just assume success for simplicity
+                true
+            }
+        } else {
+            // No match pattern means set the title for the active tab
+            self.set_active_tab_title(&command.title)
+        };
+
+        if success {
+            Ok(KittyCommandResult::success_empty())
+        } else {
+            Ok(KittyCommandResult::error("Failed to set tab title"))
         }
     }
 }
@@ -755,6 +921,8 @@ mod tests {
                 index: Some(0),
                 title: "Custom Tab".to_string(),
                 windows: vec![],
+                is_active: true,
+                is_focused: true,
                 state: Some("active".to_string()),
                 recent: Some(0),
             }],

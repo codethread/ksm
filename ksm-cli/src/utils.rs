@@ -64,7 +64,12 @@ pub fn format_project_for_selection(name: &str, path: &str) -> String {
 }
 
 pub fn format_session_tab_title(project_name: &str) -> String {
-    format!("📁 {}", project_name)
+    format!("session:{}", project_name)
+}
+
+/// Format session tab title with description for human readability
+pub fn format_session_tab_title_with_description(project_name: &str, description: &str) -> String {
+    format!("session:{} - {}", project_name, description)
 }
 
 /// Direction for tab navigation
@@ -308,12 +313,24 @@ mod tests {
 
     #[test]
     fn test_format_session_tab_title() {
-        assert_eq!(format_session_tab_title("my-project"), "📁 my-project");
+        assert_eq!(format_session_tab_title("my-project"), "session:my-project");
         assert_eq!(
             format_session_tab_title("project with spaces"),
-            "📁 project with spaces"
+            "session:project with spaces"
         );
-        assert_eq!(format_session_tab_title(""), "📁 ");
+        assert_eq!(format_session_tab_title(""), "session:");
+    }
+
+    #[test]
+    fn test_format_session_tab_title_with_description() {
+        assert_eq!(
+            format_session_tab_title_with_description("my-project", "Development"),
+            "session:my-project - Development"
+        );
+        assert_eq!(
+            format_session_tab_title_with_description("test", "Staging Environment"),
+            "session:test - Staging Environment"
+        );
     }
 
     #[test]

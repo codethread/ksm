@@ -67,4 +67,10 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Rename the current tab while preserving session markers
+    #[command(name = "rename-tab")]
+    RenameTab {
+        /// New description/name for the tab
+        description: String,
+    },
 }

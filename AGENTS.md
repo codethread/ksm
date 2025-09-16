@@ -1,4 +1,4 @@
-# CLAUDE.md
+# ksm (kitty session manager) Agents file
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -32,8 +32,8 @@ This is a Rust workspace with two main packages:
 
 - Entry point: `src/main.rs`
 - Core modules: `app.rs`, `cli.rs`, `config.rs`, `kitty.rs`
-- Commands: `src/cmd/` (key.rs, list.rs, select.rs, next_tab.rs, prev_tab.rs)
-- Session management: `src/session.rs` (session context detection and last-active tab tracking)
+- Commands: `src/cmd/` (key.rs, list.rs, select.rs, next_tab.rs, prev_tab.rs, rename_tab.rs)
+- Session management: `src/session.rs` (session context detection via tab titles and env vars, last-active tab tracking)
 - Uses clap for CLI parsing, skim for fuzzy selection
 
 **kitty-lib** (`kitty-lib/`): Library for Kitty terminal integration
@@ -41,7 +41,7 @@ This is a Rust workspace with two main packages:
 - `CommandExecutor` trait in `src/executor/` for abstracting Kitty kitten commands
 - `KittyExecutor`: Production implementation that calls actual kitten commands
 - `MockExecutor`: Test implementation with call tracking and configurable responses
-- Command structs in `src/commands/`: `KittenLsCommand`, `KittenFocusTabCommand`, `KittenLaunchCommand`, `KittenNavigateTabCommand`
+- Command structs in `src/commands/`: `KittenLsCommand`, `KittenFocusTabCommand`, `KittenLaunchCommand`, `KittenNavigateTabCommand`, `KittenSetTabTitleCommand`
 - Shared types and utilities in `src/types.rs` and `src/utils.rs`
 
 **Key architectural patterns:**
@@ -56,3 +56,42 @@ This is a Rust workspace with two main packages:
 - Unit tests use `MockExecutor` to simulate Kitty interactions
 - Integration tests in `/tests/` directory
 - CLI tests verify argument parsing and command routing
+
+## Session Identification
+
+KSM uses a robust dual-approach for session identification:
+
+1. **Primary: Tab Titles** - Sessions are marked with `session:<name>` prefix in tab titles
+2. **Fallback: Environment Variables** - Uses `KITTY_SESSION_PROJECT` for backward compatibility
+
+**Recommended Kitty Configuration:**
+
+Add to `~/.config/kitty/kitty.conf` to preserve session titles:
+
+```bash
+# Disable automatic title updates
+shell_integration no-title
+```
+
+**Commands:**
+
+- `ksm rename-tab "Description"` - Rename tab while preserving session marker
+  - In session: Sets title to `session:name - Description`
+  - No session: Sets title to `Description`
+
+## Keybinding Philosophy
+
+KSM does NOT implement or manage keybindings directly. Instead:
+
+- KSM exposes CLI commands that wrap Kitty terminal functionality
+- Users are expected to configure their own keybindings in their Kitty config
+- This approach provides maximum flexibility and avoids conflicts with existing user configurations
+
+Example Kitty configuration to bind KSM commands:
+
+```bash
+# In ~/.config/kitty/kitty.conf
+map ctrl+shift+] kitten @ launch --type=overlay ksm next-tab
+map ctrl+shift+[ kitten @ launch --type=overlay ksm prev-tab
+map ctrl+shift+t kitten @ launch --type=overlay ksm new-tab
+```

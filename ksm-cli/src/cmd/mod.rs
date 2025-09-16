@@ -4,6 +4,7 @@ pub mod list;
 pub mod new_tab;
 pub mod next_tab;
 pub mod prev_tab;
+pub mod rename_tab;
 pub mod select;
 
 // Re-export the main command functions
@@ -13,4 +14,5 @@ pub use list::cmd_list;
 pub use new_tab::cmd_new_tab;
 pub use next_tab::cmd_next_tab;
 pub use prev_tab::cmd_prev_tab;
+pub use rename_tab::cmd_rename_tab;
 pub use select::cmd_select;

@@ -232,28 +232,6 @@ impl Config {
                                 }
                             }
 
-                            // Merge keybindings config
-                            if let Some(ref profile_keybindings) = session.keybindings {
-                                let base_keybindings = result
-                                    .keybindings
-                                    .get_or_insert_with(KeybindingConfig::default);
-                                if profile_keybindings.next_tab.is_some() {
-                                    base_keybindings.next_tab =
-                                        profile_keybindings.next_tab.clone();
-                                }
-                                if profile_keybindings.prev_tab.is_some() {
-                                    base_keybindings.prev_tab =
-                                        profile_keybindings.prev_tab.clone();
-                                }
-                                if profile_keybindings.new_tab.is_some() {
-                                    base_keybindings.new_tab = profile_keybindings.new_tab.clone();
-                                }
-                                if profile_keybindings.close_all_session_tabs.is_some() {
-                                    base_keybindings.close_all_session_tabs =
-                                        profile_keybindings.close_all_session_tabs.clone();
-                                }
-                            }
-
                             // Merge unnamed session config
                             if let Some(ref profile_unnamed) = session.unnamed_session {
                                 let base_unnamed = result
@@ -289,11 +267,6 @@ impl Config {
             .as_ref()
             .and_then(|n| n.wrap_tabs)
             .unwrap_or(true) // Default to true for backward compatibility
-    }
-
-    /// Get the keybindings configuration
-    pub fn keybindings(&self) -> Option<KeybindingConfig> {
-        self.resolved_session().keybindings
     }
 
     /// Get the unnamed session configuration

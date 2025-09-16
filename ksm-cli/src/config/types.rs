@@ -130,8 +130,6 @@ pub struct SearchConfig {
 pub struct SessionBehaviorConfig {
     /// Default navigation behavior for session tabs
     pub navigation: Option<NavigationConfig>,
-    /// Keybinding configuration for session commands
-    pub keybindings: Option<KeybindingConfig>,
     /// Default behavior for unnamed sessions
     pub unnamed_session: Option<UnnamedSessionConfig>,
 }
@@ -141,19 +139,6 @@ pub struct SessionBehaviorConfig {
 pub struct NavigationConfig {
     /// Whether to wrap around when navigating tabs (default: true)
     pub wrap_tabs: Option<bool>,
-}
-
-/// Keybinding configuration for session commands
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub struct KeybindingConfig {
-    /// Keybinding for next-tab command
-    pub next_tab: Option<String>,
-    /// Keybinding for prev-tab command  
-    pub prev_tab: Option<String>,
-    /// Keybinding for new-tab command
-    pub new_tab: Option<String>,
-    /// Keybinding for close-all-session-tabs command
-    pub close_all_session_tabs: Option<String>,
 }
 
 /// Configuration for default unnamed session behavior

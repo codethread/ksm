@@ -29,6 +29,10 @@ pub struct KittyTab {
     pub title: String,
     pub windows: Vec<KittyWindow>,
     #[serde(default)]
+    pub is_active: bool,
+    #[serde(default)]
+    pub is_focused: bool,
+    #[serde(default)]
     pub state: Option<String>,
     #[serde(default)]
     pub recent: Option<u32>,

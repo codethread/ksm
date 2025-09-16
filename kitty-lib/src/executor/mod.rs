@@ -6,6 +6,7 @@ use crate::commands::focus_tab::KittenFocusTabCommand;
 use crate::commands::launch::KittenLaunchCommand;
 use crate::commands::ls::KittenLsCommand;
 use crate::commands::navigate_tab::KittenNavigateTabCommand;
+use crate::commands::set_tab_title::KittenSetTabTitleCommand;
 use crate::types::{KittyCommandResult, KittyLaunchResponse, KittyLsResponse};
 use anyhow::Result;
 
@@ -18,6 +19,7 @@ pub trait CommandExecutor {
         command: KittenLaunchCommand,
     ) -> Result<KittyCommandResult<KittyLaunchResponse>>;
     fn navigate_tab(&self, command: KittenNavigateTabCommand) -> Result<KittyCommandResult<()>>;
+    fn set_tab_title(&self, command: KittenSetTabTitleCommand) -> Result<KittyCommandResult<()>>;
 }
 
 pub use kitty_executor::KittyExecutor;

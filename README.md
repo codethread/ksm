@@ -99,6 +99,9 @@ ksm select
 
 # List all available projects
 ksm list
+
+# Rename current tab (preserves session context)
+ksm rename-tab "Development Environment"
 ```
 
 ### Session-Aware Tab Navigation
@@ -126,6 +129,34 @@ ksm prev-tab --no-wrap
 - **Wrap-Around**: By default, navigation wraps around (last tab → first tab), but can be disabled with `--no-wrap`
 
 This allows you to efficiently navigate between tabs relevant to your current project without cycling through unrelated tabs.
+
+#### Session Identification
+
+KSM uses a robust dual-approach for identifying sessions:
+
+1. **Tab Titles** (Primary): Sessions are marked with a `session:<name>` prefix in tab titles, which persists even when windows within a tab are closed
+2. **Environment Variables** (Fallback): Uses `KITTY_SESSION_PROJECT` for backward compatibility with existing sessions
+
+The `rename-tab` command allows you to customize tab descriptions while preserving the session marker:
+
+```bash
+# In a session named "myproject"
+ksm rename-tab "API Development"
+# Tab title becomes: "session:myproject - API Development"
+
+# Outside of any session
+ksm rename-tab "Personal Tasks"
+# Tab title becomes: "Personal Tasks"
+```
+
+### Recommended Kitty Configuration
+
+To prevent Kitty from automatically overwriting session titles, add this to your `~/.config/kitty/kitty.conf`:
+
+```bash
+# Preserve custom tab titles (including session markers)
+shell_integration no-title
+```
 
 ## Development
 

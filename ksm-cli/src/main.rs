@@ -7,7 +7,7 @@ use ksm::app::App;
 use ksm::cli::{Cli, Commands};
 use ksm::cmd::{
     cmd_close_all_session_tabs, cmd_key, cmd_keys, cmd_list, cmd_new_tab, cmd_next_tab,
-    cmd_prev_tab, cmd_select,
+    cmd_prev_tab, cmd_rename_tab, cmd_select,
 };
 use ksm::config::Config;
 
@@ -72,6 +72,11 @@ fn main() -> Result<()> {
                 if force { " (forced)" } else { "" }
             );
             cmd_close_all_session_tabs(&app, session.as_deref(), force)?;
+            Ok(())
+        }
+        Some(Commands::RenameTab { description }) => {
+            info!("Renaming current tab to: {}", description);
+            cmd_rename_tab(&app, &description)?;
             Ok(())
         }
         None => {

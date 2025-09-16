@@ -28,4 +28,10 @@ impl KittenLsCommand {
         self.use_tab_match = true;
         self
     }
+
+    pub fn match_tab_title(mut self, title_pattern: &str) -> Self {
+        self.match_arg = Some(format!("title:{}", title_pattern));
+        self.use_tab_match = true;
+        self
+    }
 }

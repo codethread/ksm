@@ -25,12 +25,6 @@ P3 = "test_project_c"
 # Enable wrapping for testing both wrap and no-wrap scenarios
 wrap_tabs = true
 
-[session.keybindings]
-next_tab = "ctrl+shift+]"
-prev_tab = "ctrl+shift+["
-new_tab = "ctrl+shift+t"
-close_all_session_tabs = "ctrl+shift+w"
-
 [session.unnamed_session]
 treat_as_session = false
 enable_navigation = true

@@ -1,31 +1,56 @@
 use std::env;
 
+/// The source of session identification
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionSource {
+    /// Session detected from tab title with session: prefix
+    TabTitle,
+    /// Session detected from KITTY_SESSION_PROJECT environment variable
+    Environment,
+    /// Default unnamed session (no session context found)
+    Default,
+}
+
 /// The environment variable used to identify the session/project context
 pub const KITTY_SESSION_PROJECT_ENV: &str = "KITTY_SESSION_PROJECT";
 
 /// The default session name for tabs created outside of any specific session
 pub const UNNAMED_SESSION: &str = "unnamed";
 
-/// Represents the current session context detected from environment variables
+/// Represents the current session context detected from tab titles or environment variables
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionContext {
     /// The session/project name, or "unnamed" if no session context is found
     pub session_name: String,
     /// Whether this session was explicitly set (true) or is the default unnamed session (false)
     pub is_explicit: bool,
+    /// The source of the session identification
+    pub source: SessionSource,
 }
 
 impl SessionContext {
-    /// Detects the current session context from environment variables
+    /// Detects the current session context from tab title or environment variables
     pub fn detect() -> Self {
+        // Try tab title first
+        if let Some(session_name) = Self::detect_from_tab_title() {
+            return Self {
+                session_name,
+                is_explicit: true,
+                source: SessionSource::TabTitle,
+            };
+        }
+
+        // Fall back to environment variable
         match env::var(KITTY_SESSION_PROJECT_ENV) {
             Ok(session_name) if !session_name.is_empty() => Self {
                 session_name,
                 is_explicit: true,
+                source: SessionSource::Environment,
             },
             _ => Self {
                 session_name: UNNAMED_SESSION.to_string(),
                 is_explicit: false,
+                source: SessionSource::Default,
             },
         }
     }
@@ -35,6 +60,7 @@ impl SessionContext {
         Self {
             session_name: session_name.into(),
             is_explicit: true,
+            source: SessionSource::Environment, // Default to environment source for manually created contexts
         }
     }
 
@@ -43,6 +69,7 @@ impl SessionContext {
         Self {
             session_name: UNNAMED_SESSION.to_string(),
             is_explicit: false,
+            source: SessionSource::Default,
         }
     }
 
@@ -54,6 +81,48 @@ impl SessionContext {
     /// Returns the session name
     pub fn name(&self) -> &str {
         &self.session_name
+    }
+
+    /// Detects session from the current tab title by parsing the session: prefix
+    fn detect_from_tab_title() -> Option<String> {
+        use kitty_lib::commands::ls::KittenLsCommand;
+        use kitty_lib::executor::{CommandExecutor, KittyExecutor};
+
+        // Create a KittyExecutor to get the current tab info
+        let executor = KittyExecutor::new();
+
+        // Get current tab info
+        let ls_result = executor.ls(KittenLsCommand::new()).ok()?;
+
+        // Find the active tab across all OS windows
+        for os_window in ls_result {
+            for tab in os_window.tabs {
+                if tab.is_active {
+                    // Parse the tab title for session: prefix
+                    if let Some(session_name) = Self::parse_session_from_title(&tab.title) {
+                        return Some(session_name);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Parses a session name from a tab title with the format "session:<name>[ - description]"
+    pub fn parse_session_from_title(title: &str) -> Option<String> {
+        if let Some(after_prefix) = title.strip_prefix("session:") {
+            // Split on " - " to handle optional description
+            let session_name = after_prefix.split(" - ").next()?;
+
+            if !session_name.is_empty() {
+                Some(session_name.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 
@@ -176,10 +245,12 @@ mod tests {
                 Some(session_name) if !session_name.is_empty() => Self {
                     session_name,
                     is_explicit: true,
+                    source: SessionSource::Environment,
                 },
                 _ => Self {
                     session_name: UNNAMED_SESSION.to_string(),
                     is_explicit: false,
+                    source: SessionSource::Default,
                 },
             }
         }

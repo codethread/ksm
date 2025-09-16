@@ -171,6 +171,19 @@ Enable users to create and navigate tabs within Kitty sessions with session-awar
 4. Removed redundant filtering logic since `--match-tab` already returns the correct tabs
 5. Updated all session tab operations to use `match_tab_env()` instead of `match_env()`
 
+### Regression Found (2025-01-16)
+
+**Issue**: Navigation commands (`prev-tab` and `next-tab`) were not working - tabs were not changing when running the commands.
+
+**Root Cause**: The implementation was checking `tab.state == "active"` to find the currently active tab, but in Kitty's actual JSON output, the `state` field is `null`. The correct field to check is `tab.is_active` which is a boolean.
+
+**Fix Applied**:
+
+1. Added `is_active` and `is_focused` boolean fields to the `KittyTab` struct to match Kitty's actual JSON schema
+2. Updated `KittyExecutor::navigate_tab()` to check `t.is_active` instead of `t.state.as_ref().is_some_and(|s| s == "active")`
+3. Updated `MockExecutor` to properly set the `is_active` field when tabs change
+4. Verified navigation works correctly: tabs cycle sequentially in creation order (Tab 1 → Tab 2 → Tab 3) with proper wrap-around
+
 ### Prevention Strategies for Future Planning
 
 1. **Explicit API Documentation**: When planning features that interact with external tools (like Kitty), document the exact API calls and flags that will be used. In this case, explicitly stating "use `--match-tab` for tab filtering" would have prevented the issue.
